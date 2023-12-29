@@ -92,6 +92,8 @@ class retrieve_hass:
         """
         self.logger.info("Retrieve hass get data method initiated...")
         self.df_final = pd.DataFrame()
+        finalVals = {}
+
         # Looping on each day from days list
         for day in days_list:
         
@@ -146,9 +148,18 @@ class retrieve_hass:
                 df_tp.set_index(pd.to_datetime(df_raw['last_changed'], format="ISO8601"), inplace=True)
                 df_tp = df_tp.resample(self.freq).mean()
                 df_day = pd.concat([df_day, df_tp], axis=1)
-            
+                finalVals[var] = float(df_raw.iloc[-1]['state'])
+                
             self.df_final = pd.concat([self.df_final, df_day], axis=0)
         self.df_final = set_df_index_freq(self.df_final)
+
+
+        # set the last entry of sensor values to be the last entry in the processed dataframe
+        # this step helps avoid averaging over the half-hour
+        for var in var_list:
+            self.df_final.iloc[-1, self.df_final.columns.get_loc(var)] = finalVals[var]
+
+
         if self.df_final.index.freq != self.freq:
             self.logger.error("The inferred freq from data is not equal to the defined freq in passed parameters")
 
