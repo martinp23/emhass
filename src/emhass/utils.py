@@ -5,6 +5,10 @@ from typing import Tuple, Optional
 import numpy as np, pandas as pd
 import yaml, pytz, logging, pathlib, json, copy
 from datetime import datetime, timedelta, timezone
+import plotly.express as px
+pd.options.plotting.backend = "plotly"
+
+from emhass.machine_learning_forecaster import MLForecaster
 
 
 def get_root(file: str, num_parent: Optional[int] = 3) -> str:
@@ -294,12 +298,12 @@ def treat_runtimeparams(runtimeparams: str, params: str, retrieve_hass_conf: dic
         if 'perform_backtest' not in runtimeparams.keys():
             perform_backtest = False
         else:
-            perform_backtest = runtimeparams['perform_backtest']
+            perform_backtest = eval(str(runtimeparams['perform_backtest']).capitalize())
         params['passed_data']['perform_backtest'] = perform_backtest
         if 'model_predict_publish' not in runtimeparams.keys():
             model_predict_publish = False
         else:
-            model_predict_publish = runtimeparams['model_predict_publish']
+            model_predict_publish = eval(str(runtimeparams['model_predict_publish']).capitalize())
         params['passed_data']['model_predict_publish'] = model_predict_publish
         if 'model_predict_entity_id' not in runtimeparams.keys():
             model_predict_entity_id = "sensor.p_load_forecast_custom_model"
@@ -328,9 +332,9 @@ def treat_runtimeparams(runtimeparams: str, params: str, retrieve_hass_conf: dic
         if 'def_end_timestep' in runtimeparams.keys():
             optim_conf['def_end_timestep'] = runtimeparams['def_end_timestep']
         if 'treat_def_as_semi_cont' in runtimeparams.keys():
-            optim_conf['treat_def_as_semi_cont'] = runtimeparams['treat_def_as_semi_cont']
+            optim_conf['treat_def_as_semi_cont'] = [eval(str(k).capitalize()) for k in runtimeparams['treat_def_as_semi_cont']]
         if 'set_def_constant' in runtimeparams.keys():
-            optim_conf['set_def_constant'] = runtimeparams['set_def_constant']
+            optim_conf['set_def_constant'] = [eval(str(k).capitalize()) for k in runtimeparams['set_def_constant']]
         if 'solcast_api_key' in runtimeparams.keys():
             retrieve_hass_conf['solcast_api_key'] = runtimeparams['solcast_api_key']
             optim_conf['weather_forecast_method'] = 'solcast'
@@ -438,6 +442,226 @@ def get_yaml_parse(config_path: str, use_secrets: Optional[bool] = True,
         plant_conf = input_conf.get('plant_conf', {})
     
     return retrieve_hass_conf, optim_conf, plant_conf
+
+def get_injection_dict(df: pd.DataFrame, plot_size: Optional[int] = 1366) -> dict:
+    """
+    Build a dictionary with graphs and tables for the webui.
+
+    :param df: The optimization result DataFrame
+    :type df: pd.DataFrame
+    :param plot_size: Size of the plot figure in pixels, defaults to 1366
+    :type plot_size: Optional[int], optional
+    :return: A dictionary containing the graphs and tables in html format
+    :rtype: dict
+    
+    """
+    cols_p = [i for i in df.columns.to_list() if 'P_' in i]
+    # Let's round the data in the DF
+    optim_status = df['optim_status'].unique().item()
+    df.drop('optim_status', axis=1, inplace=True)
+    cols_else = [i for i in df.columns.to_list() if 'P_' not in i]
+    df = df.apply(pd.to_numeric)
+    df[cols_p] = df[cols_p].astype(int)
+    df[cols_else] = df[cols_else].round(3)
+    # Create plots
+    n_colors = len(cols_p)
+    colors = px.colors.sample_colorscale("jet", [n/(n_colors -1) for n in range(n_colors)])
+    fig_0 = px.line(df[cols_p], title='Systems powers schedule after optimization results', 
+                    template='presentation', line_shape="hv",
+                    color_discrete_sequence=colors)
+    fig_0.update_layout(xaxis_title='Timestamp', yaxis_title='System powers (W)')
+    if 'SOC_opt' in df.columns.to_list():
+        fig_1 = px.line(df['SOC_opt'], title='Battery state of charge schedule after optimization results', 
+                        template='presentation',  line_shape="hv",
+                        color_discrete_sequence=colors)
+        fig_1.update_layout(xaxis_title='Timestamp', yaxis_title='Battery SOC (%)')
+    cols_cost = [i for i in df.columns.to_list() if 'cost_' in i or 'unit_' in i]
+    n_colors = len(cols_cost)
+    colors = px.colors.sample_colorscale("jet", [n/(n_colors -1) for n in range(n_colors)])
+    fig_2 = px.line(df[cols_cost], title='Systems costs obtained from optimization results', 
+                    template='presentation', line_shape="hv",
+                    color_discrete_sequence=colors)
+    fig_2.update_layout(xaxis_title='Timestamp', yaxis_title='System costs (currency)')
+    # Get full path to image
+    image_path_0 = fig_0.to_html(full_html=False, default_width='75%')
+    if 'SOC_opt' in df.columns.to_list():
+        image_path_1 = fig_1.to_html(full_html=False, default_width='75%')
+    image_path_2 = fig_2.to_html(full_html=False, default_width='75%')
+    # The tables
+    table1 = df.reset_index().to_html(classes='mystyle', index=False)
+    cost_cols = [i for i in df.columns if 'cost_' in i]
+    table2 = df[cost_cols].reset_index().sum(numeric_only=True)
+    table2['optim_status'] = optim_status
+    table2 = table2.to_frame(name='Value').reset_index(names='Variable').to_html(classes='mystyle', index=False)
+    # The dict of plots
+    injection_dict = {}
+    injection_dict['title'] = '<h2>EMHASS optimization results</h2>'
+    injection_dict['subsubtitle0'] = '<h4>Plotting latest optimization results</h4>'
+    injection_dict['figure_0'] = image_path_0
+    if 'SOC_opt' in df.columns.to_list():
+        injection_dict['figure_1'] = image_path_1
+    injection_dict['figure_2'] = image_path_2
+    injection_dict['subsubtitle1'] = '<h4>Last run optimization results table</h4>'
+    injection_dict['table1'] = table1
+    injection_dict['subsubtitle2'] = '<h4>Summary table for latest optimization results</h4>'
+    injection_dict['table2'] = table2
+    return injection_dict
+
+def get_injection_dict_forecast_model_fit(df_fit_pred: pd.DataFrame, mlf: MLForecaster) -> dict:
+    """
+    Build a dictionary with graphs and tables for the webui for special MLF fit case.
+
+    :param df_fit_pred: The fit result DataFrame
+    :type df_fit_pred: pd.DataFrame
+    :param mlf: The MLForecaster object
+    :type mlf: MLForecaster
+    :return: A dictionary containing the graphs and tables in html format
+    :rtype: dict
+    """
+    fig = df_fit_pred.plot()
+    fig.layout.template = 'presentation'
+    fig.update_yaxes(title_text = mlf.model_type)
+    fig.update_xaxes(title_text = "Time")
+    image_path_0 = fig.to_html(full_html=False, default_width='75%')
+    # The dict of plots
+    injection_dict = {}
+    injection_dict['title'] = '<h2>Custom machine learning forecast model fit</h2>'
+    injection_dict['subsubtitle0'] = '<h4>Plotting train/test forecast model results for '+mlf.model_type+'</h4>'
+    injection_dict['subsubtitle0'] = '<h4>Forecasting variable '+mlf.var_model+'</h4>'
+    injection_dict['figure_0'] = image_path_0
+    return injection_dict
+
+def get_injection_dict_forecast_model_tune(df_pred_optim: pd.DataFrame, mlf: MLForecaster) -> dict:
+    """
+    Build a dictionary with graphs and tables for the webui for special MLF tune case.
+
+    :param df_pred_optim: The tune result DataFrame
+    :type df_pred_optim: pd.DataFrame
+    :param mlf: The MLForecaster object
+    :type mlf: MLForecaster
+    :return: A dictionary containing the graphs and tables in html format
+    :rtype: dict
+    """
+    fig = df_pred_optim.plot()
+    fig.layout.template = 'presentation'
+    fig.update_yaxes(title_text = mlf.model_type)
+    fig.update_xaxes(title_text = "Time")
+    image_path_0 = fig.to_html(full_html=False, default_width='75%')
+    # The dict of plots
+    injection_dict = {}
+    injection_dict['title'] = '<h2>Custom machine learning forecast model tune</h2>'
+    injection_dict['subsubtitle0'] = '<h4>Performed a tuning routine using bayesian optimization for '+mlf.model_type+'</h4>'
+    injection_dict['subsubtitle0'] = '<h4>Forecasting variable '+mlf.var_model+'</h4>'
+    injection_dict['figure_0'] = image_path_0
+    return injection_dict
+
+def build_params(params: dict, params_secrets: dict, options: dict, addon: int, logger: logging.Logger) -> dict:
+    """
+    Build the main params dictionary from the loaded options.json when using the add-on.
+
+    :param params: The main params dictionary
+    :type params: dict
+    :param params_secrets: The dictionary containing the secret protected variables
+    :type params_secrets: dict
+    :param options: The load dictionary from options.json
+    :type options: dict
+    :param addon: A "bool" to select if we are using the add-on
+    :type addon: int
+    :param logger: The logger object
+    :type logger: logging.Logger
+    :return: The builded dictionary
+    :rtype: dict
+    """
+    if addon == 1:
+        # Updating variables in retrieve_hass_conf
+        params['retrieve_hass_conf']['freq'] = options.get('optimization_time_step',params['retrieve_hass_conf']['freq'])
+        params['retrieve_hass_conf']['days_to_retrieve'] = options.get('historic_days_to_retrieve',params['retrieve_hass_conf']['days_to_retrieve'])
+        params['retrieve_hass_conf']['var_PV'] = options.get('sensor_power_photovoltaics',params['retrieve_hass_conf']['var_PV'])
+        params['retrieve_hass_conf']['var_load'] = options.get('sensor_power_load_no_var_loads',params['retrieve_hass_conf']['var_load'])
+        params['retrieve_hass_conf']['load_negative'] = options.get('load_negative',params['retrieve_hass_conf']['load_negative'])
+        params['retrieve_hass_conf']['set_zero_min'] = options.get('set_zero_min',params['retrieve_hass_conf']['set_zero_min'])
+        params['retrieve_hass_conf']['var_replace_zero'] = [options.get('sensor_power_photovoltaics',params['retrieve_hass_conf']['var_replace_zero'])]
+        params['retrieve_hass_conf']['var_interp'] = [options.get('sensor_power_photovoltaics',params['retrieve_hass_conf']['var_PV']), options.get('sensor_power_load_no_var_loads',params['retrieve_hass_conf']['var_load'])]
+        params['retrieve_hass_conf']['method_ts_round'] = options.get('method_ts_round',params['retrieve_hass_conf']['method_ts_round'])
+        # Update params Secrets if specified
+        params['params_secrets'] = params_secrets
+        params['params_secrets']['time_zone'] = options.get('time_zone',params_secrets['time_zone'])
+        params['params_secrets']['lat'] = options.get('Latitude',params_secrets['lat'])
+        params['params_secrets']['lon'] = options.get('Longitude',params_secrets['lon'])
+        params['params_secrets']['alt'] = options.get('Altitude',params_secrets['alt'])
+        # Updating variables in optim_conf
+        params['optim_conf']['set_use_battery'] = options.get('set_use_battery',params['optim_conf']['set_use_battery'])
+        params['optim_conf']['num_def_loads'] = options.get('number_of_deferrable_loads',params['optim_conf']['num_def_loads'])
+        if options.get('list_nominal_power_of_deferrable_loads',None) != None: 
+            params['optim_conf']['P_deferrable_nom'] = [i['nominal_power_of_deferrable_loads'] for i in options.get('list_nominal_power_of_deferrable_loads')]
+        if options.get('list_operating_hours_of_each_deferrable_load',None) != None: 
+            params['optim_conf']['def_total_hours'] = [i['operating_hours_of_each_deferrable_load'] for i in options.get('list_operating_hours_of_each_deferrable_load')]
+        if options.get('list_treat_deferrable_load_as_semi_cont',None) != None: 
+            params['optim_conf']['treat_def_as_semi_cont'] = [i['treat_deferrable_load_as_semi_cont'] for i in options.get('list_treat_deferrable_load_as_semi_cont')]
+        params['optim_conf']['weather_forecast_method'] = options.get('weather_forecast_method',params['optim_conf']['weather_forecast_method'])
+        # Update optional param secrets
+        if params['optim_conf']['weather_forecast_method'] == "solcast":
+            params['params_secrets']['solcast_api_key'] = options.get('optional_solcast_api_key',params_secrets.get('solcast_api_key',"123456"))
+            params['params_secrets']['solcast_rooftop_id'] = options.get('optional_solcast_rooftop_id',params_secrets.get('solcast_rooftop_id',"123456"))
+        elif params['optim_conf']['weather_forecast_method'] == "solar.forecast":    
+            params['params_secrets']['solar_forecast_kwp'] = options.get('optional_solar_forecast_kwp',params_secrets.get('solar_forecast_kwp',5))
+        params['optim_conf']['load_forecast_method'] = options.get('load_forecast_method',params['optim_conf']['load_forecast_method'])
+        params['optim_conf']['delta_forecast'] = options.get('delta_forecast_daily',params['optim_conf']['delta_forecast'])
+        params['optim_conf']['load_cost_forecast_method'] = options.get('load_cost_forecast_method',params['optim_conf']['load_cost_forecast_method'])
+        if options.get('list_set_deferrable_load_single_constant',None) != None: 
+            params['optim_conf']['set_def_constant'] = [i['set_deferrable_load_single_constant'] for i in options.get('list_set_deferrable_load_single_constant')]
+        if options.get('list_peak_hours_periods_start_hours',None) != None:
+            start_hours_list = [i['peak_hours_periods_start_hours'] for i in options['list_peak_hours_periods_start_hours']]
+            end_hours_list = [i['peak_hours_periods_end_hours'] for i in options['list_peak_hours_periods_end_hours']]
+            num_peak_hours = len(start_hours_list)
+            list_hp_periods_list = [{'period_hp_'+str(i+1):[{'start':start_hours_list[i]},{'end':end_hours_list[i]}]} for i in range(num_peak_hours)]
+            params['optim_conf']['list_hp_periods'] = list_hp_periods_list
+        params['optim_conf']['load_cost_hp'] = options.get('load_peak_hours_cost',params['optim_conf']['load_cost_hp'])
+        params['optim_conf']['load_cost_hc'] = options.get('load_offpeak_hours_cost', params['optim_conf']['load_cost_hc'])
+        params['optim_conf']['prod_price_forecast_method'] = options.get('production_price_forecast_method', params['optim_conf']['prod_price_forecast_method'])
+        params['optim_conf']['prod_sell_price'] = options.get('photovoltaic_production_sell_price',params['optim_conf']['prod_sell_price'])
+        params['optim_conf']['set_total_pv_sell'] = options.get('set_total_pv_sell',params['optim_conf']['set_total_pv_sell'])
+        params['optim_conf']['lp_solver'] = options.get('lp_solver',params['optim_conf']['lp_solver'])
+        params['optim_conf']['lp_solver_path'] = options.get('lp_solver_path',params['optim_conf']['lp_solver_path'])
+        params['optim_conf']['set_nocharge_from_grid'] = options.get('set_nocharge_from_grid',params['optim_conf']['set_nocharge_from_grid'])
+        params['optim_conf']['set_nodischarge_to_grid'] = options.get('set_nodischarge_to_grid',params['optim_conf']['set_nodischarge_to_grid'])
+        params['optim_conf']['set_battery_dynamic'] = options.get('set_battery_dynamic',params['optim_conf']['set_battery_dynamic'])
+        params['optim_conf']['battery_dynamic_max'] = options.get('battery_dynamic_max',params['optim_conf']['battery_dynamic_max'])
+        params['optim_conf']['battery_dynamic_min'] = options.get('battery_dynamic_min',params['optim_conf']['battery_dynamic_min'])
+        params['optim_conf']['weight_battery_discharge'] = options.get('weight_battery_discharge',params['optim_conf']['weight_battery_discharge'])
+        params['optim_conf']['weight_battery_charge'] = options.get('weight_battery_charge',params['optim_conf']['weight_battery_charge'])
+        if options.get('list_start_timesteps_of_each_deferrable_load',None) != None: 
+            params['optim_conf']['def_start_timestep'] = [i['start_timesteps_of_each_deferrable_load'] for i in options.get('list_start_timesteps_of_each_deferrable_load')]
+        if options.get('list_end_timesteps_of_each_deferrable_load',None) != None: 
+            params['optim_conf']['def_end_timestep'] = [i['end_timesteps_of_each_deferrable_load'] for i in options.get('list_end_timesteps_of_each_deferrable_load')]
+        # Updating variables in plant_con
+            params['plant_conf']['P_grid_max'] = options.get('maximum_power_from_grid',params['plant_conf']['P_grid_max'])
+        if options.get('list_pv_module_model',None) != None:         
+            params['plant_conf']['module_model'] = [i['pv_module_model'] for i in options.get('list_pv_module_model')]
+        if options.get('list_pv_inverter_model',None) != None:        
+            params['plant_conf']['inverter_model'] = [i['pv_inverter_model'] for i in options.get('list_pv_inverter_model')]
+        if options.get('list_surface_tilt',None) != None:        
+            params['plant_conf']['surface_tilt'] = [i['surface_tilt'] for i in options.get('list_surface_tilt')]
+        if options.get('list_surface_azimuth',None) != None:         
+            params['plant_conf']['surface_azimuth'] = [i['surface_azimuth'] for i in options.get('list_surface_azimuth')]
+        if options.get('list_modules_per_string',None) != None:         
+            params['plant_conf']['modules_per_string'] = [i['modules_per_string'] for i in options.get('list_modules_per_string')]
+        if options.get('list_strings_per_inverter',None) != None: 
+            params['plant_conf']['strings_per_inverter'] = [i['strings_per_inverter'] for i in options.get('list_strings_per_inverter')]
+        params['plant_conf']['Pd_max'] = options.get('battery_discharge_power_max',params['plant_conf']['Pd_max']) 
+        params['plant_conf']['Pc_max'] = options.get('battery_charge_power_max',params['plant_conf']['Pc_max'])
+        params['plant_conf']['eta_disch'] = options.get('battery_discharge_efficiency',params['plant_conf']['eta_disch'])
+        params['plant_conf']['eta_ch'] = options.get('battery_charge_efficiency',params['plant_conf']['eta_ch'])
+        params['plant_conf']['Enom'] = options.get('battery_nominal_energy_capacity',params['plant_conf']['Enom'])
+        params['plant_conf']['SOCmin'] = options.get('battery_minimum_state_of_charge',params['plant_conf']['SOCmin']) 
+        params['plant_conf']['SOCmax'] = options.get('battery_maximum_state_of_charge',params['plant_conf']['SOCmax']) 
+        params['plant_conf']['SOCtarget'] = options.get('battery_target_state_of_charge',params['plant_conf']['SOCtarget'])
+    else:
+        params['params_secrets'] = params_secrets
+    # The params dict
+    params['passed_data'] = {'pv_power_forecast':None,'load_power_forecast':None,'load_cost_forecast':None,'prod_price_forecast':None,
+                             'prediction_horizon':None,'soc_init':None,'soc_final':None,'def_total_hours':None,'def_start_timestep':None,'def_end_timestep':None,'alpha':None,'beta':None}
+    return params
 
 def get_days_list(days_to_retrieve: int) -> pd.date_range:
     """

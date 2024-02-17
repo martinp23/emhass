@@ -123,7 +123,21 @@ class TestCommandLineUtils(unittest.TestCase):
                                               action, logger, get_data_from_file=True)
         self.assertTrue(input_data_dict['fcst'].optim_conf['load_cost_forecast_method']=='list')
         self.assertTrue(input_data_dict['fcst'].optim_conf['prod_price_forecast_method']=='list')
-        
+    
+    def test_webserver_get_injection_dict(self):
+        # First perform a day-ahead optimization
+        config_path = pathlib.Path(root+'/config_emhass.yaml')
+        base_path = str(config_path.parent)
+        costfun = 'profit'
+        action = 'dayahead-optim'
+        input_data_dict = set_input_data_dict(config_path, base_path, costfun, self.params_json, self.runtimeparams_json, 
+                                              action, logger, get_data_from_file=True)
+        opt_res = dayahead_forecast_optim(input_data_dict, logger, debug=True)
+        injection_dict = utils.get_injection_dict(opt_res)
+        self.assertIsInstance(injection_dict, dict)
+        self.assertIsInstance(injection_dict['table1'], str)
+        self.assertIsInstance(injection_dict['table2'], str)
+    
     def test_dayahead_forecast_optim(self):
         config_path = pathlib.Path(root+'/config_emhass.yaml')
         base_path = str(config_path.parent)
@@ -276,6 +290,7 @@ class TestCommandLineUtils(unittest.TestCase):
                                               action, logger, get_data_from_file=True)
         self.assertTrue(input_data_dict['params']['passed_data']['model_type'] == 'load_forecast')
         self.assertTrue(input_data_dict['params']['passed_data']['sklearn_model'] == 'KNeighborsRegressor')
+        self.assertTrue(input_data_dict['params']['passed_data']['perform_backtest'] == False)
         # Check that the default params are loaded
         input_data_dict = set_input_data_dict(config_path, base_path, costfun, self.params_json, self.runtimeparams_json, 
                                               action, logger, get_data_from_file=True)
@@ -286,6 +301,10 @@ class TestCommandLineUtils(unittest.TestCase):
         df_fit_pred, df_fit_pred_backtest, mlf = forecast_model_fit(input_data_dict, logger, debug=True)
         self.assertIsInstance(df_fit_pred, pd.DataFrame)
         self.assertTrue(df_fit_pred_backtest == None)
+        # Test ijection_dict for fit method on webui
+        injection_dict = utils.get_injection_dict_forecast_model_fit(df_fit_pred, mlf)
+        self.assertIsInstance(injection_dict, dict)
+        self.assertIsInstance(injection_dict['figure_0'], str)
         # Test the predict method on observations following the train period
         input_data_dict = set_input_data_dict(config_path, base_path, costfun, params_json, runtimeparams_json, 
                                               action, logger, get_data_from_file=True)
@@ -300,6 +319,10 @@ class TestCommandLineUtils(unittest.TestCase):
         df_pred_optim, mlf = forecast_model_tune(input_data_dict, logger, debug=True, mlf=mlf)
         self.assertIsInstance(df_pred_optim, pd.DataFrame)
         self.assertTrue(mlf.is_tuned == True)
+        # Test ijection_dict for tune method on webui
+        injection_dict = utils.get_injection_dict_forecast_model_tune(df_fit_pred, mlf)
+        self.assertIsInstance(injection_dict, dict)
+        self.assertIsInstance(injection_dict['figure_0'], str)
     
     @patch('sys.argv', ['main', '--action', 'test', '--config', str(pathlib.Path(root+'/config_emhass.yaml')), 
                         '--debug', 'True'])

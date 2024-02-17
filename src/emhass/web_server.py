@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import sys
 from flask import Flask, request, make_response, render_template
 from jinja2 import Environment, PackageLoader
 from requests import get
@@ -11,164 +10,17 @@ from pathlib import Path
 import os, json, argparse, pickle, yaml, logging
 from distutils.util import strtobool
 import pandas as pd
-import plotly.express as px
-pd.options.plotting.backend = "plotly"
+
 from emhass.command_line import set_input_data_dict
 from emhass.command_line import perfect_forecast_optim, dayahead_forecast_optim, naive_mpc_optim
 from emhass.command_line import forecast_model_fit, forecast_model_predict, forecast_model_tune
 from emhass.command_line import publish_data
+from emhass.utils import get_injection_dict, get_injection_dict_forecast_model_fit, \
+    get_injection_dict_forecast_model_tune, build_params
 
 # Define the Flask instance
 app = Flask(__name__)
 
-def get_injection_dict(df, plot_size = 1366):
-    cols_p = [i for i in df.columns.to_list() if 'P_' in i]
-    # Let's round the data in the DF
-    cols_else = [i for i in df.columns.to_list() if 'P_' not in i]
-    df.loc[:, cols_p] = df[cols_p].astype(int)
-    df.loc[:, cols_else] = df[cols_else].round(2)
-    # Create plots
-    n_colors = len(cols_p)
-    colors = px.colors.sample_colorscale("jet", [n/(n_colors -1) for n in range(n_colors)])
-    fig_0 = px.line(df[cols_p], title='Systems powers schedule after optimization results', 
-                    template='presentation', line_shape="hv",
-                    color_discrete_sequence=colors)
-    fig_0.update_layout(xaxis_title='Timestamp', yaxis_title='System powers (W)')
-    if 'SOC_opt' in df.columns.to_list():
-        fig_1 = px.line(df['SOC_opt'], title='Battery state of charge schedule after optimization results', 
-                        template='presentation',  line_shape="hv",
-                        color_discrete_sequence=colors)
-        fig_1.update_layout(xaxis_title='Timestamp', yaxis_title='Battery SOC (%)')
-    cols_cost = [i for i in df.columns.to_list() if 'cost_' in i or 'unit_' in i]
-    n_colors = len(cols_cost)
-    colors = px.colors.sample_colorscale("jet", [n/(n_colors -1) for n in range(n_colors)])
-    fig_2 = px.line(df[cols_cost], title='Systems costs obtained from optimization results', 
-                    template='presentation', line_shape="hv",
-                    color_discrete_sequence=colors)
-    fig_2.update_layout(xaxis_title='Timestamp', yaxis_title='System costs (currency)')
-    # Get full path to image
-    image_path_0 = fig_0.to_html(full_html=False, default_width='75%')
-    if 'SOC_opt' in df.columns.to_list():
-        image_path_1 = fig_1.to_html(full_html=False, default_width='75%')
-    image_path_2 = fig_2.to_html(full_html=False, default_width='75%')
-    # The tables
-    table1 = df.reset_index().to_html(classes='mystyle', index=False)
-    cost_cols = [i for i in df.columns if 'cost_' in i]
-    table2 = df[cost_cols].reset_index().sum(numeric_only=True).to_frame(name='Cost Totals').reset_index().to_html(classes='mystyle', index=False)
-    # The dict of plots
-    injection_dict = {}
-    injection_dict['title'] = '<h2>EMHASS optimization results</h2>'
-    injection_dict['subsubtitle0'] = '<h4>Plotting latest optimization results</h4>'
-    injection_dict['figure_0'] = image_path_0
-    if 'SOC_opt' in df.columns.to_list():
-        injection_dict['figure_1'] = image_path_1
-    injection_dict['figure_2'] = image_path_2
-    injection_dict['subsubtitle1'] = '<h4>Last run optimization results table</h4>'
-    injection_dict['table1'] = table1
-    injection_dict['subsubtitle2'] = '<h4>Cost totals for latest optimization results</h4>'
-    injection_dict['table2'] = table2
-    return injection_dict
-
-def get_injection_dict_forecast_model_fit(df_fit_pred, mlf):
-    fig = df_fit_pred.plot()
-    fig.layout.template = 'presentation'
-    fig.update_yaxes(title_text = mlf.model_type)
-    fig.update_xaxes(title_text = "Time")
-    image_path_0 = fig.to_html(full_html=False, default_width='75%')
-    # The dict of plots
-    injection_dict = {}
-    injection_dict['title'] = '<h2>Custom machine learning forecast model fit</h2>'
-    injection_dict['subsubtitle0'] = '<h4>Plotting train/test forecast model results for '+mlf.model_type+'</h4>'
-    injection_dict['subsubtitle0'] = '<h4>Forecasting variable '+mlf.var_model+'</h4>'
-    injection_dict['figure_0'] = image_path_0
-    return injection_dict
-
-def get_injection_dict_forecast_model_tune(df_pred_optim, mlf):
-    fig = df_pred_optim.plot()
-    fig.layout.template = 'presentation'
-    fig.update_yaxes(title_text = mlf.model_type)
-    fig.update_xaxes(title_text = "Time")
-    image_path_0 = fig.to_html(full_html=False, default_width='75%')
-    # The dict of plots
-    injection_dict = {}
-    injection_dict['title'] = '<h2>Custom machine learning forecast model tune</h2>'
-    injection_dict['subsubtitle0'] = '<h4>Performed a tuning routine using bayesian optimization for '+mlf.model_type+'</h4>'
-    injection_dict['subsubtitle0'] = '<h4>Forecasting variable '+mlf.var_model+'</h4>'
-    injection_dict['figure_0'] = image_path_0
-    return injection_dict
-
-def build_params(params, options, addon):
-    if addon == 1:
-        # Updating variables in retrieve_hass_conf
-        params['retrieve_hass_conf']['freq'] = options['optimization_time_step']
-        params['retrieve_hass_conf']['days_to_retrieve'] = options['historic_days_to_retrieve']
-        params['retrieve_hass_conf']['var_PV'] = options['sensor_power_photovoltaics']
-        params['retrieve_hass_conf']['var_load'] = options['sensor_power_load_no_var_loads']
-        params['retrieve_hass_conf']['load_negative'] = [options['load_negative']]
-        params['retrieve_hass_conf']['set_zero_min'] = [options['set_zero_min']]
-        params['retrieve_hass_conf']['var_replace_zero'] = [options['sensor_power_photovoltaics']]
-        params['retrieve_hass_conf']['var_interp'] = [options['sensor_power_photovoltaics'], options['sensor_power_load_no_var_loads']]
-        params['retrieve_hass_conf']['method_ts_round'] = options['method_ts_round']
-        params['retrieve_hass_conf']['solcast_api_key'] = options['optional_solcast_api_key']
-        params['retrieve_hass_conf']['solcast_rooftop_id'] = options['optional_solcast_rooftop_id']
-        params['retrieve_hass_conf']['solar_forecast_kwp'] = options['optional_solar_forecast_kwp']
-        params['retrieve_hass_conf']['time_zone'] = options['time_zone']
-        params['retrieve_hass_conf']['lat'] = options['Latitude']
-        params['retrieve_hass_conf']['lon'] = options['Longitude']
-        params['retrieve_hass_conf']['alt'] = options['Altitude']
-        # Updating variables in optim_conf
-        params['optim_conf']['set_use_battery'] = options['set_use_battery']
-        params['optim_conf']['num_def_loads'] = options['number_of_deferrable_loads']
-        params['optim_conf']['P_deferrable_nom'] = [i['nominal_power_of_deferrable_loads'] for i in options['list_nominal_power_of_deferrable_loads']]
-        params['optim_conf']['def_total_hours'] = [i['operating_hours_of_each_deferrable_load'] for i in options['list_operating_hours_of_each_deferrable_load']]
-        params['optim_conf']['treat_def_as_semi_cont'] = [i['treat_deferrable_load_as_semi_cont'] for i in options['list_treat_deferrable_load_as_semi_cont']]
-        params['optim_conf']['weather_forecast_method'] = options['weather_forecast_method']
-        params['optim_conf']['load_forecast_method'] = options['load_forecast_method']
-        params['optim_conf']['delta_forecast'] = options['delta_forecast_daily']
-        params['optim_conf']['load_cost_forecast_method'] = options['load_cost_forecast_method']
-        params['optim_conf']['set_def_constant'] = [i['set_deferrable_load_single_constant'] for i in options['list_set_deferrable_load_single_constant']]
-        start_hours_list = [i['peak_hours_periods_start_hours'] for i in options['list_peak_hours_periods_start_hours']]
-        end_hours_list = [i['peak_hours_periods_end_hours'] for i in options['list_peak_hours_periods_end_hours']]
-        num_peak_hours = len(start_hours_list)
-        list_hp_periods_list = [{'period_hp_'+str(i+1):[{'start':start_hours_list[i]},{'end':end_hours_list[i]}]} for i in range(num_peak_hours)]
-        params['optim_conf']['list_hp_periods'] = list_hp_periods_list
-        params['optim_conf']['load_cost_hp'] = options['load_peak_hours_cost']
-        params['optim_conf']['load_cost_hc'] = options['load_offpeak_hours_cost']
-        params['optim_conf']['prod_price_forecast_method'] = options['production_price_forecast_method']
-        params['optim_conf']['prod_sell_price'] = options['photovoltaic_production_sell_price']
-        params['optim_conf']['set_total_pv_sell'] = options['set_total_pv_sell']
-        params['optim_conf']['lp_solver'] = options['lp_solver']
-        params['optim_conf']['lp_solver_path'] = options['lp_solver_path']
-        params['optim_conf']['set_nocharge_from_grid'] = options['set_nocharge_from_grid']
-        params['optim_conf']['set_nodischarge_to_grid'] = options['set_nodischarge_to_grid']
-        params['optim_conf']['set_battery_dynamic'] = options['set_battery_dynamic']
-        params['optim_conf']['battery_dynamic_max'] = options['battery_dynamic_max']
-        params['optim_conf']['battery_dynamic_min'] = options['battery_dynamic_min']
-        params['optim_conf']['weight_battery_discharge'] = options['weight_battery_discharge']
-        params['optim_conf']['weight_battery_charge'] = options['weight_battery_charge']
-        params['optim_conf']['def_start_timestep'] = [i['start_timesteps_of_each_deferrable_load'] for i in options['list_start_timesteps_of_each_deferrable_load']]
-        params['optim_conf']['def_end_timestep'] = [i['end_timesteps_of_each_deferrable_load'] for i in options['list_end_timesteps_of_each_deferrable_load']]
-        # Updating variables in plant_conf
-        params['plant_conf']['P_grid_max'] = options['maximum_power_from_grid']
-        params['plant_conf']['module_model'] = [i['pv_module_model'] for i in options['list_pv_module_model']]
-        params['plant_conf']['inverter_model'] = [i['pv_inverter_model'] for i in options['list_pv_inverter_model']]
-        params['plant_conf']['surface_tilt'] = [i['surface_tilt'] for i in options['list_surface_tilt']]
-        params['plant_conf']['surface_azimuth'] = [i['surface_azimuth'] for i in options['list_surface_azimuth']]
-        params['plant_conf']['modules_per_string'] = [i['modules_per_string'] for i in options['list_modules_per_string']]
-        params['plant_conf']['strings_per_inverter'] = [i['strings_per_inverter'] for i in options['list_strings_per_inverter']]
-        params['plant_conf']['Pd_max'] = options['battery_discharge_power_max']
-        params['plant_conf']['Pc_max'] = options['battery_charge_power_max']
-        params['plant_conf']['eta_disch'] = options['battery_discharge_efficiency']
-        params['plant_conf']['eta_ch'] = options['battery_charge_efficiency']
-        params['plant_conf']['Enom'] = options['battery_nominal_energy_capacity']
-        params['plant_conf']['SOCmin'] = options['battery_minimum_state_of_charge']
-        params['plant_conf']['SOCmax'] = options['battery_maximum_state_of_charge']
-        params['plant_conf']['SOCtarget'] = options['battery_target_state_of_charge']
-    # The params dict
-    params['params_secrets'] = params_secrets
-    params['passed_data'] = {'pv_power_forecast':None,'load_power_forecast':None,'load_cost_forecast':None,'prod_price_forecast':None,
-                             'prediction_horizon':None,'soc_init':None,'soc_final':None,'def_total_hours':None,'def_start_timestep':None,'def_end_timestep':None,'alpha':None,'beta':None}
-    return params
 
 @app.route('/')
 def index():
@@ -266,33 +118,47 @@ if __name__ == "__main__":
     parser.add_argument('--url', type=str, help='The URL to your Home Assistant instance, ex the external_url in your hass configuration')
     parser.add_argument('--key', type=str, help='Your access key. If using EMHASS in standalone this should be a Long-Lived Access Token')
     parser.add_argument('--addon', type=strtobool, default='False', help='Define if we are usinng EMHASS with the add-on or in standalone mode')
+    parser.add_argument('--no_response', type=strtobool, default='False', help='This is set if json response errors occur')
     args = parser.parse_args()
     
+    use_options = os.getenv('USE_OPTIONS', default=False)
     # Define the paths
-    DATA_PATH = os.getenv("DATA_PATH", default="/app/data/")
-    data_path = Path(DATA_PATH)
-    if args.addon:
-        OPTIONS_PATH = os.getenv('OPTIONS_PATH', default=data_path / "options.json")
+    if args.addon==1:
+        OPTIONS_PATH = os.getenv('OPTIONS_PATH', default="/data/options.json")
         options_json = Path(OPTIONS_PATH)
         CONFIG_PATH = os.getenv("CONFIG_PATH", default="/usr/src/config_emhass.yaml")
-        hass_url = args.url
-        key = args.key
+        #Obtain url and key from ENV or ARG
+        hass_url = os.getenv("EMHASS_URL", default=args.url)
+        key =  os.getenv("EMHASS_KEY", default=args.key) 
+        #If url or key is None, Set as empty string to reduce NoneType errors bellow
+        if key is None: key = ""
+        if hass_url is None: hass_url = ""
         # Read options info
         if options_json.exists():
             with options_json.open('r') as data:
                 options = json.load(data)
         else:
             app.logger.error("options.json does not exists")
-
-        DATA_PATH = "/share/" #"/data/"
+        DATA_PATH = os.getenv("DATA_PATH", default="/share/")
     else:
+        if use_options:
+            OPTIONS_PATH = os.getenv('OPTIONS_PATH', default="/app/options.json")
+            options_json = Path(OPTIONS_PATH)
+            # Read options info
+            if options_json.exists():
+                with options_json.open('r') as data:
+                    options = json.load(data)
+            else:
+                app.logger.error("options.json does not exists")
+        else:
+            options = None
         CONFIG_PATH = os.getenv("CONFIG_PATH", default="/app/config_emhass.yaml")
-        options = None
         DATA_PATH = os.getenv("DATA_PATH", default="/app/data/")
 
     config_path = Path(CONFIG_PATH)
+    data_path = Path(DATA_PATH)
     
-    # Read example config file
+    # Read the example default config file
     if config_path.exists():
         with open(config_path, 'r') as file:
             config = yaml.load(file, Loader=yaml.FullLoader)
@@ -300,7 +166,7 @@ if __name__ == "__main__":
         optim_conf = config['optim_conf']
         plant_conf = config['plant_conf']
     else:
-        app.logger.error("config_emhass.json does not exists")
+        app.logger.error("Unable to open the default configuration yaml file")
         app.logger.info("Failed config_path: "+str(config_path))
 
     params = {}
@@ -320,15 +186,15 @@ if __name__ == "__main__":
         # The cost function
         costfun = options.get('costfun', 'profit')
         # Some data from options
-        logging_level = options['logging_level']
+        logging_level = options.get('logging_level','INFO')
         url_from_options = options.get('hass_url', 'empty')
-        if url_from_options == 'empty':
+        if url_from_options == 'empty' or url_from_options == '':
             url = hass_url+"/config"
         else:
             hass_url = url_from_options
             url = hass_url+"/api/config"
         token_from_options = options.get('long_lived_token', 'empty')
-        if token_from_options == 'empty':
+        if token_from_options == 'empty' or token_from_options == '':
             long_lived_token = key
         else:
             long_lived_token = token_from_options
@@ -336,17 +202,45 @@ if __name__ == "__main__":
             "Authorization": "Bearer " + long_lived_token,
             "content-type": "application/json"
         }
-        response = get(url, headers=headers)
-        config_hass = response.json()
-        params_secrets = {
+        if not args.no_response==1:
+            response = get(url, headers=headers)
+            config_hass = response.json()
+            params_secrets = {
             'hass_url': hass_url,
             'long_lived_token': long_lived_token,
             'time_zone': config_hass['time_zone'],
             'lat': config_hass['latitude'],
             'lon': config_hass['longitude'],
             'alt': config_hass['elevation']
-        }
-    else:
+            }
+        else: #if no_response is set to true
+            costfun = os.getenv('LOCAL_COSTFUN', default='profit')
+            logging_level = os.getenv('LOGGING_LEVEL', default='INFO')
+            # check if secrets file exists
+            if Path(os.getenv('SECRETS_PATH', default='/app/secrets_emhass.yaml')).is_file(): 
+                with open(os.getenv('SECRETS_PATH', default='/app/secrets_emhass.yaml'), 'r') as file:
+                    params_secrets = yaml.load(file, Loader=yaml.FullLoader)
+                    app.logger.debug("Obtained secrets from secrets file")
+            #If cant find secrets_emhass file, use env
+            else: 
+                app.logger.debug("Failed to find secrets file: "+str(os.getenv('SECRETS_PATH', default='/app/secrets_emhass.yaml')))
+                app.logger.debug("Setting location defaults")
+                params_secrets = {} 
+                #If no secrets file try args, else set some defaults 
+                params_secrets['time_zone'] = os.getenv("TIME_ZONE", default="Europe/Paris")
+                params_secrets['lat'] = float(os.getenv("LAT", default="45.83"))
+                params_secrets['lon'] = float(os.getenv("LON", default="6.86"))
+                params_secrets['alt'] = float(os.getenv("ALT", default="4807.8"))      
+            #If ARG/ENV specify url and key, then override secrets file
+            if hass_url != "":
+                params_secrets['hass_url'] = hass_url
+                app.logger.debug("Using URL obtained from ARG/ENV")
+            else:
+                hass_url = params_secrets.get('hass_url',"http://localhost:8123/")      
+            if long_lived_token != "":
+                params_secrets['long_lived_token'] = long_lived_token
+                app.logger.debug("Using Key obtained from ARG/ENV")       
+    else: #If addon is false
         costfun = os.getenv('LOCAL_COSTFUN', default='profit')
         logging_level = os.getenv('LOGGING_LEVEL', default='INFO')
         with open(os.getenv('SECRETS_PATH', default='/app/secrets_emhass.yaml'), 'r') as file:
@@ -354,7 +248,10 @@ if __name__ == "__main__":
         hass_url = params_secrets['hass_url']
         
     # Build params
-    params = build_params(params, options, args.addon)
+    if use_options:
+        params = build_params(params, params_secrets, options, 1, app.logger)
+    else:
+        params = build_params(params, params_secrets, options, args.addon, app.logger)
     with open(str(data_path / 'params.pkl'), "wb") as fid:
         pickle.dump((config_path, params), fid)
 

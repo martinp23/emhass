@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.7.7] - 2024-02-10
+### Improvement
+- Bumped the webui. Some great new features and styling. Now it is possible to pass data directly as lsit of values when using the buttons in the webui. Thanks to @GeoDerp
+- Added two additional testing environment options. Thanks to @GeoDerp
+### Fix
+- Bump markupsafe from 2.1.4 to 2.1.5
+
+## [0.7.6] - 2024-02-06
+### Fix
+- Fixed number of startups constraint for deferrable load at the begining of the optimization period
+- Fixed list of bools from options.json
+- Fixed some testing and debugging scripts
+
+## [0.7.5] - 2024-02-04
+### Fix
+- Fixing again "perform_backtest": "false" has no effect
+
+## [0.7.4] - 2024-02-04
+### Fix
+- Fixed broken build params method. Reverting back to alternate PR from @GeoDerp
+
+## [0.7.3] - 2024-02-04
+### Fix
+- Fixed bug when booleans, solving "perform_backtest": "false" has no effect
+- Refactored util.py method to handle optional parameters
+- Updated web server, solving runtime issues
+- Solved issue passing solcast and solar.forecast runtime params 
+- Updated documentation requirements
+
+## [0.7.2] - 2024-01-30
+### Fix
+- Patched new version wer server issues of missing list types
+
+## [0.7.1] - 2024-01-29
+### Fix
+- Patched new version wer server issues accessing correct paths
+
+## [0.7.0] - 2024-01-28
+### Improvement
+- Added a new feature to provide operating time windows for deferrable loads. Thanks to @michaelpiron
+- Added lots of new options to be configured by the user. Thanks to @GeoDerp
+- Updated stylesheet with mobile & dark theme by @GeoDerp
+- Improved launch.json to fully test EMHASS on different configurations. Thanks to @GeoDerp
+- Added new script to debug and develop new time series clustering feature
+- Improved documentation. Thanks to @g1za
+### Fix
+- Updated github workflow actions/checkout to v4 and actions/setup-python to v5
+- Changed default values for weight_battery_discharge and weight_battery_charge to zero
+- Renamed classes to conform to PEP8
+- Bump markupsafe from 2.1.3 to 2.1.4 
+
 ## [0.6.2] - 2024-01-04
 ### Improvement
 - Added option to pass additional weight for battery usage
@@ -504,6 +555,16 @@
 [0.5.0]: https://github.com/davidusb-geek/emhass/releases/tag/v0.5.0
 [0.5.1]: https://github.com/davidusb-geek/emhass/releases/tag/v0.5.1
 [0.6.0]: https://github.com/davidusb-geek/emhass/releases/tag/v0.6.0
+[0.6.1]: https://github.com/davidusb-geek/emhass/releases/tag/v0.6.1
+[0.6.2]: https://github.com/davidusb-geek/emhass/releases/tag/v0.6.2
+[0.7.0]: https://github.com/davidusb-geek/emhass/releases/tag/v0.7.0
+[0.7.1]: https://github.com/davidusb-geek/emhass/releases/tag/v0.7.1
+[0.7.2]: https://github.com/davidusb-geek/emhass/releases/tag/v0.7.2
+[0.7.3]: https://github.com/davidusb-geek/emhass/releases/tag/v0.7.3
+[0.7.4]: https://github.com/davidusb-geek/emhass/releases/tag/v0.7.4
+[0.7.5]: https://github.com/davidusb-geek/emhass/releases/tag/v0.7.5
+[0.7.6]: https://github.com/davidusb-geek/emhass/releases/tag/v0.7.6
+[0.7.7]: https://github.com/davidusb-geek/emhass/releases/tag/v0.7.7
 
 # Notes
 All notable changes to this project will be documented in this file.

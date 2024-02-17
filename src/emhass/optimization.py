@@ -11,7 +11,7 @@ from pulp import PULP_CBC_CMD, COIN_CMD, GLPK_CMD
 from math import ceil
 
 
-class optimization:
+class Optimization:
     r"""
     Optimize the deferrable load and battery energy dispatch problem using \ 
     the linear programming optimization technique. All equipement equations, \
@@ -34,7 +34,7 @@ class optimization:
                  costfun: str, base_path: str, logger: logging.Logger, 
                  opt_time_delta: Optional[int] = 24) -> None:
         r"""
-        Define constructor for optimization class.
+        Define constructor for Optimization class.
         
         :param retrieve_hass_conf: Configuration parameters used to retrieve data \
             from hass
@@ -286,7 +286,7 @@ class optimization:
                 })
             # Ensure deferrable loads consume energy between def_start_timestep & def_end_timestep
             self.logger.debug("Deferrable load {}: Proposed optimization window: {} --> {}".format(k, def_start_timestep[k], def_end_timestep[k]))
-            def_start, def_end, warning = optimization.validate_def_timewindow(def_start_timestep[k], def_end_timestep[k], ceil(def_total_hours[k]/self.timeStep), n)
+            def_start, def_end, warning = Optimization.validate_def_timewindow(def_start_timestep[k], def_end_timestep[k], ceil(def_total_hours[k]/self.timeStep), n)
             if warning is not None: 
                 self.logger.warning("Deferrable load {} : {}".format(k, warning))
             self.logger.debug("Deferrable load {}: Validated optimization window: {} --> {}".format(k, def_start, def_end))
@@ -328,12 +328,12 @@ class optimization:
                         sense=plp.LpConstraintLE,
                         rhs=0)
                     for i in set_I})
-                constraints.update({"constraint_pdef{}_start2_{}".format(k, i) : 
+                constraints.update({"constraint_pdef{}_start2_{}".format(k, i): 
                     plp.LpConstraint(
-                        e=P_def_start[k][i] - P_def_bin2[k][i] + P_def_bin2[k][i-1],
+                        e=P_def_start[k][i] - P_def_bin2[k][i] + (P_def_bin2[k][i-1] if i-1 >= 0 else 0),
                         sense=plp.LpConstraintGE,
                         rhs=0)
-                    for i in set_I[1:]})
+                    for i in set_I})
                 constraints.update({"constraint_pdef{}_start3".format(k) :
                 plp.LpConstraint(
                     e = plp.lpSum(P_def_start[k][i] for i in set_I),
@@ -566,10 +566,8 @@ class optimization:
 
         """
         self.logger.info("Perform optimization for the day-ahead")
-        
         unit_load_cost = df_input_data[self.var_load_cost].values # €/kWh
         unit_prod_price = df_input_data[self.var_prod_price].values # €/kWh
-        
         # Call optimization function
         self.opt_res = self.perform_optimization(df_input_data, P_PV.values.ravel(), 
                                                  P_load.values.ravel(), 
@@ -616,16 +614,13 @@ class optimization:
 
         """
         self.logger.info("Perform an iteration of a naive MPC controller")
-        
         if prediction_horizon < 5:
             self.logger.error("Set the MPC prediction horizon to at least 5 times the optimization time step")
             return pd.DataFrame()
         else:
             df_input_data = copy.deepcopy(df_input_data)[df_input_data.index[0]:df_input_data.index[prediction_horizon-1]]
-        
         unit_load_cost = df_input_data[self.var_load_cost].values # €/kWh
         unit_prod_price = df_input_data[self.var_prod_price].values # €/kWh
-        
         # Call optimization function
         self.opt_res = self.perform_optimization(df_input_data, P_PV.values.ravel(), P_load.values.ravel(), 
                                                  unit_load_cost, unit_prod_price, soc_init=soc_init, 

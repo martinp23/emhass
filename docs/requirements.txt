@@ -11,8 +11,9 @@ pulp>=2.4
 pyyaml>=5.4.1
 tables==3.9.1
 skforecast==0.11.0
-markupsafe==2.1.4
+markupsafe==2.1.5
 Jinja2<3.2
+plotly>=5.6.0
 sphinx==6.2.1
 sphinx-rtd-theme==1.2.0
 docutils==0.18.1

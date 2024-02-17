@@ -131,7 +131,6 @@ class TestCommandLineUtils(unittest.TestCase):
         runtimeparams.update({'custom_unit_load_cost_id':'my_custom_unit_load_cost_id'})
         runtimeparams.update({'custom_unit_prod_price_id':'my_custom_unit_prod_price_id'})
         runtimeparams.update({'custom_deferrable_forecast_id':'my_custom_deferrable_forecast_id'})
-        
         runtimeparams_json = json.dumps(runtimeparams)
         retrieve_hass_conf, optim_conf, plant_conf = utils.get_yaml_parse(
             pathlib.Path(root+'/config_emhass.yaml'), use_secrets=True, params=self.params_json)
@@ -221,6 +220,39 @@ class TestCommandLineUtils(unittest.TestCase):
         self.assertIsInstance(runtimeparams['load_power_forecast'], str)
         self.assertIsInstance(runtimeparams['load_cost_forecast'], str)
         self.assertIsInstance(runtimeparams['prod_price_forecast'], str)
+    
+    def test_build_params(self):
+        config_path = root / pathlib.Path("config_emhass.yaml")
+        with open(config_path, 'r') as file:
+            config = yaml.load(file, Loader=yaml.FullLoader)
+        retrieve_hass_conf = config['retrieve_hass_conf']
+        optim_conf = config['optim_conf']
+        plant_conf = config['plant_conf']
+        params = {}
+        params['retrieve_hass_conf'] = retrieve_hass_conf
+        params['optim_conf'] = optim_conf
+        params['plant_conf'] = plant_conf
+        options_json = root / pathlib.Path("options.json")
+        # Read options info
+        with options_json.open('r') as data:
+            options = json.load(data)
+        with open(root / pathlib.Path("secrets_emhass(example).yaml"), 'r') as file:
+            params_secrets = yaml.load(file, Loader=yaml.FullLoader)
+        addon = 1
+        params = utils.build_params(params, params_secrets, options, addon, logger)
+        expected_keys = ['retrieve_hass_conf', 'params_secrets', 'optim_conf', 'plant_conf', 'passed_data']
+        for key in expected_keys:
+            self.assertTrue(key in params.keys())
+        self.assertTrue(params['params_secrets']['time_zone'] == "Europe/Paris")
+        params = {}
+        params['retrieve_hass_conf'] = retrieve_hass_conf
+        params['optim_conf'] = optim_conf
+        params['plant_conf'] = plant_conf
+        addon = 0
+        params = utils.build_params(params, params_secrets, options, addon, logger)
+        for key in expected_keys:
+            self.assertTrue(key in params.keys())
+        self.assertTrue(params['params_secrets']['time_zone'] == "Europe/Paris")
         
 if __name__ == '__main__':
     unittest.main()
