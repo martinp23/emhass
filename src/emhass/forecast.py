@@ -7,6 +7,8 @@ import copy
 import logging
 import json
 from typing import Optional
+import bz2
+import pickle as cPickle
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -133,7 +135,7 @@ class Forecast(object):
         self.time_zone = self.retrieve_hass_conf['time_zone']
         self.method_ts_round = self.retrieve_hass_conf['method_ts_round']
         self.timeStep = self.freq.seconds/3600 # in hours
-        self.time_delta = pd.to_timedelta(opt_time_delta, "hours") # The period of optimization
+        self.time_delta = pd.to_timedelta(opt_time_delta, "hours")
         self.var_PV = self.retrieve_hass_conf['var_PV']
         self.var_load = self.retrieve_hass_conf['var_load']
         self.var_load_new = self.var_load+'_positive'
@@ -159,7 +161,7 @@ class Forecast(object):
         self.end_forecast = (self.start_forecast + self.optim_conf['delta_forecast']).replace(microsecond=0)
         self.forecast_dates = pd.date_range(start=self.start_forecast, 
                                             end=self.end_forecast-self.freq, 
-                                            freq=self.freq).round(self.freq)
+                                            freq=self.freq).round(self.freq, ambiguous='infer', nonexistent=self.freq)
         if params is not None:
             if 'prediction_horizon' in list(self.params['passed_data'].keys()):
                 if self.params['passed_data']['prediction_horizon'] is not None:
@@ -184,7 +186,7 @@ class Forecast(object):
             freq_scrap = pd.to_timedelta(60, "minutes") # The scrapping time step is 60min
             forecast_dates_scrap = pd.date_range(start=self.start_forecast,
                                                  end=self.end_forecast-freq_scrap, 
-                                                 freq=freq_scrap).round(freq_scrap)
+                                                 freq=freq_scrap).round(freq_scrap, ambiguous='infer', nonexistent=freq_scrap)
             # Using the clearoutside webpage
             response = get("https://clearoutside.com/forecast/"+str(round(self.lat, 2))+"/"+str(round(self.lon, 2))+"?desktop=true")
             '''import bz2 # Uncomment to save a serialized data for tests
@@ -412,8 +414,20 @@ class Forecast(object):
                 # Setting the main parameters of the PV plant
                 location = Location(latitude=self.lat, longitude=self.lon)
                 temp_params = TEMPERATURE_MODEL_PARAMETERS['sapm']['close_mount_glass_glass']
-                cec_modules = pvlib.pvsystem.retrieve_sam('CECMod')
-                cec_inverters = pvlib.pvsystem.retrieve_sam('cecinverter')
+                # cec_modules_0 = pvlib.pvsystem.retrieve_sam('CECMod')
+                # cec_modules = pvlib.pvsystem.retrieve_sam(path=self.root + '/data/CEC Modules.csv')
+                # cols_to_keep = [elem for elem in list(cec_modules_0.columns) if elem not in list(cec_modules.columns)]
+                # cec_modules = pd.concat([cec_modules, cec_modules_0[cols_to_keep]], axis=1)
+                # with bz2.BZ2File(self.root + '/data/cec_modules.pbz2', "w") as f: 
+                #     cPickle.dump(cec_modules, f)
+                # cec_inverters_0 = pvlib.pvsystem.retrieve_sam('cecinverter')
+                # cec_inverters = pvlib.pvsystem.retrieve_sam(path=self.root + '/data/CEC Inverters.csv')
+                # with bz2.BZ2File(self.root + '/data/cec_inverters.pbz2', "w") as f: 
+                #     cPickle.dump(cec_inverters, f)
+                cec_modules = bz2.BZ2File(str(pathlib.Path(self.root+'/data/cec_modules.pbz2')), "rb")
+                cec_modules = cPickle.load(cec_modules)
+                cec_inverters = bz2.BZ2File(str(pathlib.Path(self.root+'/data/cec_inverters.pbz2')), "rb")
+                cec_inverters = cPickle.load(cec_inverters)
                 if type(self.plant_conf['module_model']) == list:
                     P_PV_forecast = pd.Series(0, index=df_weather.index)
                     for i in range(len(self.plant_conf['module_model'])):
@@ -476,7 +490,7 @@ class Forecast(object):
         end_forecast_csv = (start_forecast_csv + self.optim_conf['delta_forecast']).replace(microsecond=0)
         forecast_dates_csv = pd.date_range(start=start_forecast_csv, 
                                            end=end_forecast_csv+timedelta(days=timedelta_days)-self.freq, 
-                                           freq=self.freq).round(self.freq)
+                                           freq=self.freq).round(self.freq, ambiguous='infer', nonexistent=self.freq)
         if self.params is not None:
             if 'prediction_horizon' in list(self.params['passed_data'].keys()):
                 if self.params['passed_data']['prediction_horizon'] is not None:
@@ -585,12 +599,14 @@ class Forecast(object):
                 with open(pathlib.Path(self.root) / 'data' / 'test_df_final.pkl', 'rb') as inp:
                     rh.df_final, days_list, _ = pickle.load(inp)
             else:
-                days_list = get_days_list(days_min_load_forecast)
-                rh.get_data(days_list, var_list)
-            rh.prepare_data(self.retrieve_hass_conf['var_load'], load_negative = self.retrieve_hass_conf['load_negative'],
+                days_list = get_days_list(days_min_load_forecast) 
+                if not rh.get_data(days_list, var_list):
+                    return False
+            if  not rh.prepare_data(self.retrieve_hass_conf['var_load'], load_negative = self.retrieve_hass_conf['load_negative'],
                             set_zero_min = self.retrieve_hass_conf['set_zero_min'], 
                             var_replace_zero = var_replace_zero, 
-                            var_interp = var_interp)
+                            var_interp = var_interp):
+                return False
             df = rh.df_final.copy()[[self.var_load_new]]
         if method == 'naive': # using a naive approach
             mask_forecast_out = (df.index > days_list[-1] - self.optim_conf['delta_forecast'])

@@ -19,7 +19,7 @@ long_description = (here / 'README.md').read_text(encoding='utf-8')
 
 setup(
     name='emhass',  # Required
-    version='0.7.7',  # Required
+    version='0.8.4',  # Required
     description='An Energy Management System for Home Assistant',  # Optional
     long_description=long_description,  # Optional
     long_description_content_type='text/markdown',  # Optional (see note above)
@@ -40,8 +40,8 @@ setup(
     python_requires='>=3.9, <3.12',
     install_requires=[
         'wheel', 
-        'numpy<=1.26',
-        'scipy<=1.11.3',
+        'numpy==1.26.4',
+        'scipy==1.12.0',
         'pandas<=2.0.3',
         'pvlib>=0.10.2',
         'protobuf>=3.0.0',
@@ -62,5 +62,6 @@ setup(
             'emhass=emhass.command_line:main',
         ],
     },
-    package_data={'emhass': ['templates/index.html','static/style.css','static/img/emhass_icon.png','static/img/emhass_logo_short.svg']},
+    package_data={'emhass': ['templates/index.html','templates/template.html','static/advanced.html','static/basic.html', 'static/script.js',
+    'static/style.css','static/img/emhass_icon.png','static/img/emhass_logo_short.svg', 'static/img/feather-sprite.svg']},
 )

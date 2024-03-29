@@ -17,12 +17,14 @@ To get started go ahead and look at the installation procedure and usage instruc
 :maxdepth: 2
 
 intro.md
+differences.md
 lpems.md
 forecasts.md
 mlforecaster.md
 study_case.md
 config.md
 emhass.md
+develop.md
 ```
 
 # Indices and tables

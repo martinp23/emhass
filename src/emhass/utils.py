@@ -96,7 +96,7 @@ def get_forecast_dates(freq: int, delta_forecast: int,
     end_forecast = (start_forecast + pd.Timedelta(days=delta_forecast)).replace(microsecond=0)
     forecast_dates = pd.date_range(start=start_forecast, 
         end=end_forecast+timedelta(days=timedelta_days)-freq, 
-        freq=freq).round(freq)
+        freq=freq).round(freq, ambiguous='infer', nonexistent=freq)
     return forecast_dates
 
 def treat_runtimeparams(runtimeparams: str, params: str, retrieve_hass_conf: dict, optim_conf: dict, plant_conf: dict,
@@ -208,62 +208,23 @@ def treat_runtimeparams(runtimeparams: str, params: str, retrieve_hass_conf: dic
             params['passed_data']['alpha'] = None
             params['passed_data']['beta'] = None
         # Treat passed forecast data lists
-        if 'pv_power_forecast' in runtimeparams.keys():
-            if type(runtimeparams['pv_power_forecast']) == list and len(runtimeparams['pv_power_forecast']) >= len(forecast_dates):
-                params['passed_data']['pv_power_forecast'] = runtimeparams['pv_power_forecast']
-                optim_conf['weather_forecast_method'] = 'list'
+        list_forecast_key = ['pv_power_forecast', 'load_power_forecast', 'load_cost_forecast', 'prod_price_forecast']
+        forecast_methods = ['weather_forecast_method', 'load_forecast_method', 'load_cost_forecast_method', 'prod_price_forecast_method']
+        for method, forecast_key in enumerate(list_forecast_key):
+            if forecast_key in runtimeparams.keys():
+                if type(runtimeparams[forecast_key]) == list and len(runtimeparams[forecast_key]) >= len(forecast_dates):
+                    params['passed_data'][forecast_key] = runtimeparams[forecast_key]
+                    optim_conf[forecast_methods[method]] = 'list'
+                else:
+                    logger.error(f"ERROR: The passed data is either not a list or the length is not correct, length should be {str(len(forecast_dates))}")
+                    logger.error(f"Passed type is {str(type(runtimeparams[forecast_key]))} and length is {str(len(runtimeparams[forecast_key]))}")
+                list_non_digits = [x for x in runtimeparams[forecast_key] if not (isinstance(x, int) or isinstance(x, float))]
+                if len(list_non_digits) > 0:
+                    logger.warning(f"There are non numeric values on the passed data for {forecast_key}, check for missing values (nans, null, etc)")
+                    for x in list_non_digits:
+                        logger.warning(f"This value in {forecast_key} was detected as non digits: {str(x)}")
             else:
-                logger.error("ERROR: The passed data is either not a list or the length is not correct, length should be "+str(len(forecast_dates)))
-                logger.error("Passed type is "+str(type(runtimeparams['pv_power_forecast']))+" and length is "+str(len(runtimeparams['pv_power_forecast'])))
-            list_non_digits = [x for x in runtimeparams['pv_power_forecast'] if not (isinstance(x, int) or isinstance(x, float))]
-            if len(list_non_digits) > 0:
-                logger.warning("There are non numeric values on the passed data for pv_power_forecast, check for missing values (nans, null, etc)")
-                for x in list_non_digits:
-                    logger.warning("This value in pv_power_forecast was detected as non digits: "+str(x))
-        else:
-            params['passed_data']['pv_power_forecast'] = None
-        if 'load_power_forecast' in runtimeparams.keys():
-            if type(runtimeparams['load_power_forecast']) == list and len(runtimeparams['load_power_forecast']) >= len(forecast_dates):
-                params['passed_data']['load_power_forecast'] = runtimeparams['load_power_forecast']
-                optim_conf['load_forecast_method'] = 'list'
-            else:
-                logger.error("ERROR: The passed data is either not a list or the length is not correct, length should be "+str(len(forecast_dates)))
-                logger.error("Passed type is "+str(type(runtimeparams['load_power_forecast']))+" and length is "+str(len(runtimeparams['load_power_forecast'])))
-            list_non_digits = [x for x in runtimeparams['load_power_forecast'] if not (isinstance(x, int) or isinstance(x, float))]
-            if len(list_non_digits) > 0:
-                logger.warning("There are non numeric values on the passed data for load_power_forecast, check for missing values (nans, null, etc)")
-                for x in list_non_digits:
-                    logger.warning("This value in load_power_forecast was detected as non digits: "+str(x))
-        else:
-            params['passed_data']['load_power_forecast'] = None
-        if 'load_cost_forecast' in runtimeparams.keys():
-            if type(runtimeparams['load_cost_forecast']) == list and len(runtimeparams['load_cost_forecast']) >= len(forecast_dates):
-                params['passed_data']['load_cost_forecast'] = runtimeparams['load_cost_forecast']
-                optim_conf['load_cost_forecast_method'] = 'list'
-            else:
-                logger.error("ERROR: The passed data is either not a list or the length is not correct, length should be "+str(len(forecast_dates)))
-                logger.error("Passed type is "+str(type(runtimeparams['load_cost_forecast']))+" and length is "+str(len(runtimeparams['load_cost_forecast'])))
-            list_non_digits = [x for x in runtimeparams['load_cost_forecast'] if not (isinstance(x, int) or isinstance(x, float))]
-            if len(list_non_digits) > 0:
-                logger.warning("There are non numeric values on the passed data or load_cost_forecast, check for missing values (nans, null, etc)")
-                for x in list_non_digits:
-                    logger.warning("This value in load_cost_forecast was detected as non digits: "+str(x))
-        else:
-            params['passed_data']['load_cost_forecast'] = None
-        if 'prod_price_forecast' in runtimeparams.keys():
-            if type(runtimeparams['prod_price_forecast']) == list and len(runtimeparams['prod_price_forecast']) >= len(forecast_dates):
-                params['passed_data']['prod_price_forecast'] = runtimeparams['prod_price_forecast']
-                optim_conf['prod_price_forecast_method'] = 'list'
-            else:
-                logger.error("ERROR: The passed data is either not a list or the length is not correct, length should be "+str(len(forecast_dates)))
-                logger.error("Passed type is "+str(type(runtimeparams['prod_price_forecast']))+" and length is "+str(len(runtimeparams['prod_price_forecast'])))
-            list_non_digits = [x for x in runtimeparams['prod_price_forecast'] if not (isinstance(x, int) or isinstance(x, float))]
-            if len(list_non_digits) > 0:
-                logger.warning("There are non numeric values on the passed data for prod_price_forecast, check for missing values (nans, null, etc)")
-                for x in list_non_digits:
-                    logger.warning("This value in prod_price_forecast was detected as non digits: "+str(x))
-        else:
-            params['passed_data']['prod_price_forecast'] = None
+                params['passed_data'][forecast_key] = None
         # Treat passed data for forecast model fit/predict/tune at runtime
         if 'days_to_retrieve' not in runtimeparams.keys():
             days_to_retrieve = 9
@@ -610,7 +571,7 @@ def build_params(params: dict, params_secrets: dict, options: dict, addon: int, 
         params['optim_conf']['load_cost_forecast_method'] = options.get('load_cost_forecast_method',params['optim_conf']['load_cost_forecast_method'])
         if options.get('list_set_deferrable_load_single_constant',None) != None: 
             params['optim_conf']['set_def_constant'] = [i['set_deferrable_load_single_constant'] for i in options.get('list_set_deferrable_load_single_constant')]
-        if options.get('list_peak_hours_periods_start_hours',None) != None:
+        if options.get('list_peak_hours_periods_start_hours',None) != None and options.get('list_peak_hours_periods_end_hours',None) != None:
             start_hours_list = [i['peak_hours_periods_start_hours'] for i in options['list_peak_hours_periods_start_hours']]
             end_hours_list = [i['peak_hours_periods_end_hours'] for i in options['list_peak_hours_periods_end_hours']]
             num_peak_hours = len(start_hours_list)
@@ -634,8 +595,8 @@ def build_params(params: dict, params_secrets: dict, options: dict, addon: int, 
             params['optim_conf']['def_start_timestep'] = [i['start_timesteps_of_each_deferrable_load'] for i in options.get('list_start_timesteps_of_each_deferrable_load')]
         if options.get('list_end_timesteps_of_each_deferrable_load',None) != None: 
             params['optim_conf']['def_end_timestep'] = [i['end_timesteps_of_each_deferrable_load'] for i in options.get('list_end_timesteps_of_each_deferrable_load')]
-        # Updating variables in plant_con
-            params['plant_conf']['P_grid_max'] = options.get('maximum_power_from_grid',params['plant_conf']['P_grid_max'])
+        # Updating variables in plant_conf
+        params['plant_conf']['P_grid_max'] = options.get('maximum_power_from_grid',params['plant_conf']['P_grid_max'])
         if options.get('list_pv_module_model',None) != None:         
             params['plant_conf']['module_model'] = [i['pv_module_model'] for i in options.get('list_pv_module_model')]
         if options.get('list_pv_inverter_model',None) != None:        
@@ -656,6 +617,36 @@ def build_params(params: dict, params_secrets: dict, options: dict, addon: int, 
         params['plant_conf']['SOCmin'] = options.get('battery_minimum_state_of_charge',params['plant_conf']['SOCmin']) 
         params['plant_conf']['SOCmax'] = options.get('battery_maximum_state_of_charge',params['plant_conf']['SOCmax']) 
         params['plant_conf']['SOCtarget'] = options.get('battery_target_state_of_charge',params['plant_conf']['SOCtarget'])
+        # Check parameter lists have the same amounts as deferrable loads
+        # If not, set defaults it fill in gaps
+        if params['optim_conf']['num_def_loads'] is not len(params['optim_conf']['def_start_timestep']):
+            logger.warning("def_start_timestep / list_start_timesteps_of_each_deferrable_load does not match number in num_def_loads, adding default values to parameter")
+            for x in range(len(params['optim_conf']['def_start_timestep']), params['optim_conf']['num_def_loads']):
+                params['optim_conf']['def_start_timestep'].append(0)
+        if params['optim_conf']['num_def_loads'] is not len(params['optim_conf']['def_end_timestep']):
+            logger.warning("def_end_timestep / list_end_timesteps_of_each_deferrable_load does not match number in num_def_loads, adding default values to parameter")
+            for x in range(len(params['optim_conf']['def_end_timestep']), params['optim_conf']['num_def_loads']):
+                params['optim_conf']['def_end_timestep'].append(0)
+        if params['optim_conf']['num_def_loads'] is not len(params['optim_conf']['set_def_constant']):
+            logger.warning("set_def_constant / list_set_deferrable_load_single_constant does not match number in num_def_loads, adding default values to parameter")
+            for x in range(len(params['optim_conf']['set_def_constant']), params['optim_conf']['num_def_loads']):
+                params['optim_conf']['set_def_constant'].append(False)
+        if params['optim_conf']['num_def_loads'] is not len(params['optim_conf']['treat_def_as_semi_cont']):
+            logger.warning("treat_def_as_semi_cont / list_treat_deferrable_load_as_semi_cont does not match number in num_def_loads, adding default values to parameter")
+            for x in range(len(params['optim_conf']['treat_def_as_semi_cont']), params['optim_conf']['num_def_loads']):
+                params['optim_conf']['treat_def_as_semi_cont'].append(True)        
+        if params['optim_conf']['num_def_loads'] is not len(params['optim_conf']['def_total_hours']):
+            logger.warning("def_total_hours / list_operating_hours_of_each_deferrable_load does not match number in num_def_loads, adding default values to parameter")
+            for x in range(len(params['optim_conf']['def_total_hours']), params['optim_conf']['num_def_loads']):
+                params['optim_conf']['def_total_hours'].append(0)                   
+        if params['optim_conf']['num_def_loads'] is not len(params['optim_conf']['P_deferrable_nom']):
+            logger.warning("P_deferrable_nom / list_nominal_power_of_deferrable_loads does not match number in num_def_loads, adding default values to parameter")
+            for x in range(len(params['optim_conf']['P_deferrable_nom']), params['optim_conf']['num_def_loads']):
+                params['optim_conf']['P_deferrable_nom'].append(0)   
+        # days_to_retrieve should be no less then 2
+        if params['retrieve_hass_conf']['days_to_retrieve'] < 2:
+            params['retrieve_hass_conf']['days_to_retrieve'] = 2
+            logger.warning("days_to_retrieve should not be lower then 2, setting days_to_retrieve to 2. Make sure your sensors also have at least 2 days of history")
     else:
         params['params_secrets'] = params_secrets
     # The params dict
