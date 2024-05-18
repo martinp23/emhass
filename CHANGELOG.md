@@ -1,13 +1,40 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 - 2024-05-13
+### Fix
+- Fix patch for issue with paths to modules and inverters database
+- Fixed code formatting, or at least trying to keep a unique format
+
+## 0.9.0 - 2024-05-10
+### Improvement
+- On this new version we now have a new method to train a regression model using Scikit-Learn methods. This is the contribution of @gieljnssns. Check the dedicated section the documentation to this new feature: [https://emhass.readthedocs.io/en/latest/mlregressor.html](https://emhass.readthedocs.io/en/latest/mlregressor.html)
+- Again another bunch of nice improvements by @GeoDerp:
+  - Added Dictionary var containing EMHASS paths
+  - MLForcaster error suppression
+  - Add `freq` as runtime parameter
+  - Improved documentation added README buttons
+- Bumping dependencies:
+  - Bump h5py from 3.10.0 to 3.11.0
+  - Bump myst-parser from 2.0.0 to 3.0.1
+  - Bump skforecast from 0.11.0 to 0.12.0
+
+## 0.8.6 - 2024-04-07
+### Fix
+- Fixed bug from forecast out method related to issue 240
+- Fix patch for some issues with package file paths
+
+## 0.8.5 - 2024-04-01
 ### Improvement
 - Simplified fetch urls to relatives
 - Improved code for passed forecast data error handling in utils.py
 - Added new tests for forecast longer than 24h by changing parameter `delta_forecast`
-- Added new files for updated PV modules and inverters using PVLib
+- Added new files for updated PV modules and inverters database for use with PVLib
+- Added a new webapp to help configuring modules and inverters: [https://emhass-pvlib-database.streamlit.app/](https://emhass-pvlib-database.streamlit.app/)
+- Added a new `P_to_grid_max` variable, different from the current `P_from_grid_max` option
 ### Fix
 - style.css auto format and adjusted table styling
+- Changed pandas datetime rounding to nonexistent='shift_forward' to help survive DST change
+- Dropped support for Python 3.9
 
 ## 0.8.4 - 2024-03-13
 ### Improvement

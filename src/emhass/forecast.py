@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import pathlib
+import os
 import pickle
 import copy
 import logging
@@ -23,7 +24,7 @@ from pvlib.irradiance import disc
 
 from emhass.retrieve_hass import RetrieveHass
 from emhass.machine_learning_forecaster import MLForecaster
-from emhass.utils import get_days_list
+from emhass.utils import get_days_list, set_df_index_freq
 
 
 class Forecast(object):
@@ -98,25 +99,25 @@ class Forecast(object):
     """
 
     def __init__(self, retrieve_hass_conf: dict, optim_conf: dict, plant_conf: dict, 
-                 params: str, base_path: str, logger: logging.Logger, 
+                 params: str, emhass_conf: dict, logger: logging.Logger, 
                  opt_time_delta: Optional[int] = 24,
                  get_data_from_file: Optional[bool] = False) -> None:
         """
         Define constructor for the forecast class.
         
-        :param retrieve_hass_conf: Dictionnary containing the needed configuration
+        :param retrieve_hass_conf: Dictionary containing the needed configuration
             data from the configuration file, specific to retrieve data from HASS
         :type retrieve_hass_conf: dict
-        :param optim_conf: Dictionnary containing the needed configuration
+        :param optim_conf: Dictionary containing the needed configuration
             data from the configuration file, specific for the optimization task
         :type optim_conf: dict
-        :param plant_conf: Dictionnary containing the needed configuration
+        :param plant_conf: Dictionary containing the needed configuration
             data from the configuration file, specific for the modeling of the PV plant
         :type plant_conf: dict
         :param params: Configuration parameters passed from data/options.json
         :type params: str
-        :param base_path: The path to the yaml configuration file
-        :type base_path: str
+        :param emhass_conf: Dictionary containing the needed emhass paths
+        :type emhass_conf: dict
         :param logger: The passed logger object
         :type logger: logging object
         :param opt_time_delta: The time delta in hours used to generate forecasts, 
@@ -141,7 +142,7 @@ class Forecast(object):
         self.var_load_new = self.var_load+'_positive'
         self.lat = self.retrieve_hass_conf['lat'] 
         self.lon = self.retrieve_hass_conf['lon']
-        self.root = base_path
+        self.emhass_conf = emhass_conf
         self.logger = logger
         self.get_data_from_file = get_data_from_file
         self.var_load_cost = 'unit_load_cost'
@@ -161,7 +162,7 @@ class Forecast(object):
         self.end_forecast = (self.start_forecast + self.optim_conf['delta_forecast']).replace(microsecond=0)
         self.forecast_dates = pd.date_range(start=self.start_forecast, 
                                             end=self.end_forecast-self.freq, 
-                                            freq=self.freq).round(self.freq, ambiguous='infer', nonexistent=self.freq)
+                                            freq=self.freq).round(self.freq, ambiguous='infer', nonexistent='shift_forward')
         if params is not None:
             if 'prediction_horizon' in list(self.params['passed_data'].keys()):
                 if self.params['passed_data']['prediction_horizon'] is not None:
@@ -169,7 +170,7 @@ class Forecast(object):
         
         
     def get_weather_forecast(self, method: Optional[str] = 'scrapper',
-                             csv_path: Optional[str] = "/data/data_weather_forecast.csv") -> pd.DataFrame:
+                             csv_path: Optional[str] = "data_weather_forecast.csv") -> pd.DataFrame:
         r"""
         Get and generate weather forecast data.
         
@@ -180,13 +181,15 @@ class Forecast(object):
         :rtype: pd.DataFrame
         
         """
+        csv_path  = self.emhass_conf['data_path'] / csv_path
+
         self.logger.info("Retrieving weather forecast data using method = "+method)
         self.weather_forecast_method = method # Saving this attribute for later use to identify csv method usage
         if method == 'scrapper':
             freq_scrap = pd.to_timedelta(60, "minutes") # The scrapping time step is 60min
             forecast_dates_scrap = pd.date_range(start=self.start_forecast,
                                                  end=self.end_forecast-freq_scrap, 
-                                                 freq=freq_scrap).round(freq_scrap, ambiguous='infer', nonexistent=freq_scrap)
+                                                 freq=freq_scrap).round(freq_scrap, ambiguous='infer', nonexistent='shift_forward')
             # Using the clearoutside webpage
             response = get("https://clearoutside.com/forecast/"+str(round(self.lat, 2))+"/"+str(round(self.lon, 2))+"?desktop=true")
             '''import bz2 # Uncomment to save a serialized data for tests
@@ -292,7 +295,7 @@ class Forecast(object):
                 else:
                     data = data + data_tmp
         elif method == 'csv': # reading from a csv file
-            weather_csv_file_path = self.root + csv_path
+            weather_csv_file_path = csv_path
             # Loading the csv file, we will consider that this is the PV power in W
             data = pd.read_csv(weather_csv_file_path, header=None, names=['ts', 'yhat'])
             # Check if the passed data has the correct length       
@@ -414,19 +417,9 @@ class Forecast(object):
                 # Setting the main parameters of the PV plant
                 location = Location(latitude=self.lat, longitude=self.lon)
                 temp_params = TEMPERATURE_MODEL_PARAMETERS['sapm']['close_mount_glass_glass']
-                # cec_modules_0 = pvlib.pvsystem.retrieve_sam('CECMod')
-                # cec_modules = pvlib.pvsystem.retrieve_sam(path=self.root + '/data/CEC Modules.csv')
-                # cols_to_keep = [elem for elem in list(cec_modules_0.columns) if elem not in list(cec_modules.columns)]
-                # cec_modules = pd.concat([cec_modules, cec_modules_0[cols_to_keep]], axis=1)
-                # with bz2.BZ2File(self.root + '/data/cec_modules.pbz2', "w") as f: 
-                #     cPickle.dump(cec_modules, f)
-                # cec_inverters_0 = pvlib.pvsystem.retrieve_sam('cecinverter')
-                # cec_inverters = pvlib.pvsystem.retrieve_sam(path=self.root + '/data/CEC Inverters.csv')
-                # with bz2.BZ2File(self.root + '/data/cec_inverters.pbz2', "w") as f: 
-                #     cPickle.dump(cec_inverters, f)
-                cec_modules = bz2.BZ2File(str(pathlib.Path(self.root+'/data/cec_modules.pbz2')), "rb")
+                cec_modules =  bz2.BZ2File(pathlib.Path(__file__).parent / 'data/cec_modules.pbz2', "rb")
                 cec_modules = cPickle.load(cec_modules)
-                cec_inverters = bz2.BZ2File(str(pathlib.Path(self.root+'/data/cec_inverters.pbz2')), "rb")
+                cec_inverters = bz2.BZ2File(pathlib.Path(__file__).parent / 'data/cec_inverters.pbz2', "rb")
                 cec_inverters = cPickle.load(cec_inverters)
                 if type(self.plant_conf['module_model']) == list:
                     P_PV_forecast = pd.Series(0, index=df_weather.index)
@@ -490,15 +483,16 @@ class Forecast(object):
         end_forecast_csv = (start_forecast_csv + self.optim_conf['delta_forecast']).replace(microsecond=0)
         forecast_dates_csv = pd.date_range(start=start_forecast_csv, 
                                            end=end_forecast_csv+timedelta(days=timedelta_days)-self.freq, 
-                                           freq=self.freq).round(self.freq, ambiguous='infer', nonexistent=self.freq)
+                                           freq=self.freq).round(self.freq, ambiguous='infer', nonexistent='shift_forward')
         if self.params is not None:
             if 'prediction_horizon' in list(self.params['passed_data'].keys()):
                 if self.params['passed_data']['prediction_horizon'] is not None:
                     forecast_dates_csv = forecast_dates_csv[0:self.params['passed_data']['prediction_horizon']]
         return forecast_dates_csv
     
-    def get_forecast_out_from_csv(self, df_final: pd.DataFrame, forecast_dates_csv: pd.date_range,
-                                  csv_path: str, data_list: Optional[list] = None) -> pd.DataFrame:
+    def get_forecast_out_from_csv_or_list(self, df_final: pd.DataFrame, forecast_dates_csv: pd.date_range,
+                                          csv_path: str, data_list: Optional[list] = None, 
+                                          list_and_perfect: Optional[bool] = False) -> pd.DataFrame:
         r"""
         Get the forecast data as a DataFrame from a CSV file. 
         
@@ -516,34 +510,69 @@ class Forecast(object):
         :rtype: pd.DataFrame
 
         """
-        days_list = df_final.index.day.unique().tolist()
         if csv_path is None:
             data_dict = {'ts':forecast_dates_csv, 'yhat':data_list}
             df_csv = pd.DataFrame.from_dict(data_dict)
             df_csv.index = forecast_dates_csv
             df_csv.drop(['ts'], axis=1, inplace=True)
+            df_csv = set_df_index_freq(df_csv)
+            if list_and_perfect:
+                days_list = df_final.index.day.unique().tolist()
+            else:
+                days_list = df_csv.index.day.unique().tolist()
         else:
-            load_csv_file_path = self.root + csv_path
+            if not os.path.exists(csv_path):
+                csv_path = self.emhass_conf['data_path'] / csv_path
+            load_csv_file_path = csv_path    
             df_csv = pd.read_csv(load_csv_file_path, header=None, names=['ts', 'yhat'])
             df_csv.index = forecast_dates_csv
             df_csv.drop(['ts'], axis=1, inplace=True)
+            df_csv = set_df_index_freq(df_csv)
+            days_list = df_final.index.day.unique().tolist()
         forecast_out = pd.DataFrame()
         for day in days_list:
-            first_elm_index = [i for i, x in enumerate(df_final.index.day == day) if x][0]
-            last_elm_index = [i for i, x in enumerate(df_final.index.day == day) if x][-1]
-            fcst_index = pd.date_range(start=df_final.index[first_elm_index],
-                                       end=df_final.index[last_elm_index], 
-                                       freq=df_final.index.freq)
-            first_hour = str(df_final.index[first_elm_index].hour)+":"+str(df_final.index[first_elm_index].minute)
-            last_hour = str(df_final.index[last_elm_index].hour)+":"+str(df_final.index[last_elm_index].minute)
-            if len(forecast_out) == 0:
-                forecast_out = pd.DataFrame(
-                    df_csv.between_time(first_hour, last_hour).values,
-                    index=fcst_index)
+            if csv_path is None:
+                if list_and_perfect:
+                    df_tmp = copy.deepcopy(df_final)
+                else:
+                    df_tmp = copy.deepcopy(df_csv)
             else:
-                forecast_tp = pd.DataFrame(
-                    df_csv.between_time(first_hour, last_hour).values,
-                    index=fcst_index)
+                df_tmp = copy.deepcopy(df_final)
+            first_elm_index = [i for i, x in enumerate(df_tmp.index.day == day) if x][0]
+            last_elm_index = [i for i, x in enumerate(df_tmp.index.day == day) if x][-1]
+            fcst_index = pd.date_range(start=df_tmp.index[first_elm_index],
+                                    end=df_tmp.index[last_elm_index], 
+                                    freq=df_tmp.index.freq)
+            first_hour = str(df_tmp.index[first_elm_index].hour)+":"+str(df_tmp.index[first_elm_index].minute)
+            last_hour = str(df_tmp.index[last_elm_index].hour)+":"+str(df_tmp.index[last_elm_index].minute)
+            if len(forecast_out) == 0:
+                if csv_path is None:
+                    if list_and_perfect:
+                        forecast_out = pd.DataFrame(
+                            df_csv.between_time(first_hour, last_hour).values,
+                            index=fcst_index)
+                    else:
+                        forecast_out = pd.DataFrame(
+                            df_csv.loc[fcst_index,:].between_time(first_hour, last_hour).values,
+                            index=fcst_index)
+                else:
+                    forecast_out = pd.DataFrame(
+                        df_csv.between_time(first_hour, last_hour).values,
+                        index=fcst_index)
+            else:
+                if csv_path is None:
+                    if list_and_perfect:
+                        forecast_tp = pd.DataFrame(
+                            df_csv.between_time(first_hour, last_hour).values,
+                            index=fcst_index)
+                    else:
+                        forecast_tp = pd.DataFrame(
+                            df_csv.loc[fcst_index,:].between_time(first_hour, last_hour).values,
+                            index=fcst_index)
+                else:
+                    forecast_tp = pd.DataFrame(
+                        df_csv.between_time(first_hour, last_hour).values,
+                        index=fcst_index)
                 forecast_out = pd.concat([forecast_out, forecast_tp], axis=0)
         return forecast_out
     
@@ -586,6 +615,8 @@ class Forecast(object):
         :rtype: pd.DataFrame
 
         """
+        csv_path  = self.emhass_conf['data_path'] / csv_path
+        
         if method == 'naive' or method == 'mlforecaster': # retrieving needed data for these methods
             self.logger.info("Retrieving data from hass for load forecast using method = "+method)
             var_list = [self.var_load]
@@ -594,18 +625,24 @@ class Forecast(object):
             time_zone_load_foreacast = None
             # We will need to retrieve a new set of load data according to the days_min_load_forecast parameter
             rh = RetrieveHass(self.retrieve_hass_conf['hass_url'], self.retrieve_hass_conf['long_lived_token'], 
-                               self.freq, time_zone_load_foreacast, self.params, self.root, self.logger)
+                               self.freq, time_zone_load_foreacast, self.params, self.emhass_conf, self.logger)
             if self.get_data_from_file:
-                with open(pathlib.Path(self.root) / 'data' / 'test_df_final.pkl', 'rb') as inp:
-                    rh.df_final, days_list, _ = pickle.load(inp)
+                filename_path = self.emhass_conf['data_path'] / 'test_df_final.pkl'
+                with open(filename_path, 'rb') as inp:
+                    rh.df_final, days_list, var_list = pickle.load(inp)
+                    self.var_load = var_list[0]
+                    self.retrieve_hass_conf['var_load'] = self.var_load
+                    var_interp = [var_list[0]]
+                    self.var_list = [var_list[0]]
+                    self.var_load_new = self.var_load+'_positive'
             else:
                 days_list = get_days_list(days_min_load_forecast) 
                 if not rh.get_data(days_list, var_list):
                     return False
-            if  not rh.prepare_data(self.retrieve_hass_conf['var_load'], load_negative = self.retrieve_hass_conf['load_negative'],
-                            set_zero_min = self.retrieve_hass_conf['set_zero_min'], 
-                            var_replace_zero = var_replace_zero, 
-                            var_interp = var_interp):
+            if  not rh.prepare_data(
+                self.retrieve_hass_conf['var_load'], load_negative = self.retrieve_hass_conf['load_negative'],
+                set_zero_min = self.retrieve_hass_conf['set_zero_min'], 
+                var_replace_zero = var_replace_zero, var_interp = var_interp):
                 return False
             df = rh.df_final.copy()[[self.var_load_new]]
         if method == 'naive': # using a naive approach
@@ -619,13 +656,14 @@ class Forecast(object):
             # Load model
             model_type = self.params['passed_data']['model_type']
             filename = model_type+'_mlf.pkl'
-            filename_path = pathlib.Path(self.root) / filename
+            filename_path = self.emhass_conf['data_path'] / filename
             if not debug:
                 if filename_path.is_file():
                     with open(filename_path, 'rb') as inp:
                         mlf = pickle.load(inp)
                 else:
                     self.logger.error("The ML forecaster file was not found, please run a model fit method before this predict method")
+                    return False
             # Make predictions
             if use_last_window:
                 data_last_window = copy.deepcopy(df)
@@ -633,8 +671,15 @@ class Forecast(object):
             else:
                 data_last_window = None
             forecast_out = mlf.predict(data_last_window)
-            # Force forecast_out length to avoid mismatches
-            forecast_out = forecast_out.iloc[0:len(self.forecast_dates)]
+            # Force forecast length to avoid mismatches
+            self.logger.debug("Number of ML predict forcast data generated (lags_opt): " + str(len(forecast_out.index)))
+            self.logger.debug("Number of forcast dates obtained: " + str(len(self.forecast_dates)))
+            if len(self.forecast_dates) < len(forecast_out.index):
+                forecast_out = forecast_out.iloc[0:len(self.forecast_dates)]
+            # To be removed once bug is fixed
+            elif len(self.forecast_dates) > len(forecast_out.index):
+                self.logger.error("Unable to obtain: " + str(len(self.forecast_dates))  + " lags_opt values from sensor: power load no var loads, check optimization_time_step/freq and historic_days_to_retrieve/days_to_retrieve parameters")
+                return False
             # Define DataFrame
             data_dict = {'ts':self.forecast_dates, 'yhat':forecast_out.values.tolist()}
             data = pd.DataFrame.from_dict(data_dict)
@@ -642,7 +687,7 @@ class Forecast(object):
             data.set_index('ts', inplace=True)
             forecast_out = data.copy().loc[self.forecast_dates]
         elif method == 'csv': # reading from a csv file
-            load_csv_file_path = self.root + csv_path
+            load_csv_file_path = csv_path
             df_csv = pd.read_csv(load_csv_file_path, header=None, names=['ts', 'yhat'])
             if len(df_csv) < len(self.forecast_dates):
                 self.logger.error("Passed data from CSV is not long enough")
@@ -659,6 +704,7 @@ class Forecast(object):
             # Check if the passed data has the correct length
             if len(data_list) < len(self.forecast_dates) and self.params['passed_data']['prediction_horizon'] is None:
                 self.logger.error("Passed data from passed list is not long enough")
+                return False
             else:
                 # Ensure correct length
                 data_list = data_list[0:len(self.forecast_dates)]
@@ -670,6 +716,7 @@ class Forecast(object):
                 forecast_out = data.copy().loc[self.forecast_dates]
         else:
             self.logger.error("Passed method is not valid")
+            return False
         P_Load_forecast = copy.deepcopy(forecast_out['yhat'])
         if set_mix_forecast:
             P_Load_forecast = Forecast.get_mix_forecast(
@@ -678,7 +725,8 @@ class Forecast(object):
         return P_Load_forecast
     
     def get_load_cost_forecast(self, df_final: pd.DataFrame, method: Optional[str] = 'hp_hc_periods',
-                               csv_path: Optional[str] = "data_load_cost_forecast.csv") -> pd.DataFrame:
+                               csv_path: Optional[str] = "data_load_cost_forecast.csv",
+                               list_and_perfect: Optional[bool] = False) -> pd.DataFrame:
         r"""
         Get the unit cost for the load consumption based on multiple tariff \
         periods. This is the cost of the energy from the utility in a vector \
@@ -698,6 +746,7 @@ class Forecast(object):
         :rtype: pd.DataFrame
 
         """
+        csv_path  = self.emhass_conf['data_path'] / csv_path
         if method == 'hp_hc_periods':
             df_final[self.var_load_cost] = self.optim_conf['load_cost_hc']
             list_df_hp = []
@@ -708,7 +757,7 @@ class Forecast(object):
                 df_final.loc[df_hp.index, self.var_load_cost] = self.optim_conf['load_cost_hp']
         elif method == 'csv':
             forecast_dates_csv = self.get_forecast_days_csv(timedelta_days=0)
-            forecast_out = self.get_forecast_out_from_csv(
+            forecast_out = self.get_forecast_out_from_csv_or_list(
                 df_final, forecast_dates_csv, csv_path)
             df_final[self.var_load_cost] = forecast_out
         elif method == 'list': # reading a list of values
@@ -717,22 +766,25 @@ class Forecast(object):
             # Check if the passed data has the correct length
             if len(data_list) < len(self.forecast_dates) and self.params['passed_data']['prediction_horizon'] is None:
                 self.logger.error("Passed data from passed list is not long enough")
+                return False
             else:
                 # Ensure correct length
                 data_list = data_list[0:len(self.forecast_dates)]
                 # Define the correct dates
                 forecast_dates_csv = self.get_forecast_days_csv(timedelta_days=0)
-                forecast_out = self.get_forecast_out_from_csv(
-                    df_final, forecast_dates_csv, None, data_list=data_list)
+                forecast_out = self.get_forecast_out_from_csv_or_list(
+                    df_final, forecast_dates_csv, None, data_list=data_list, list_and_perfect=list_and_perfect)
                 # Fill the final DF
                 df_final[self.var_load_cost] = forecast_out
         else:
             self.logger.error("Passed method is not valid")
-            
+            return False
         return df_final
     
     def get_prod_price_forecast(self, df_final: pd.DataFrame, method: Optional[str] = 'constant',
-                               csv_path: Optional[str] = "/data/data_prod_price_forecast.csv") -> pd.DataFrame:
+                                csv_path: Optional[str] = "data_prod_price_forecast.csv", 
+                                list_and_perfect: Optional[bool] = False) -> pd.DataFrame:
+
         r"""
         Get the unit power production price for the energy injected to the grid.\
         This is the price of the energy injected to the utility in a vector \
@@ -753,13 +805,13 @@ class Forecast(object):
         :rtype: pd.DataFrame
 
         """
+        csv_path  = self.emhass_conf['data_path'] / csv_path
         if method == 'constant':
             df_final[self.var_prod_price] = self.optim_conf['prod_sell_price']
         elif method == 'csv':
             forecast_dates_csv = self.get_forecast_days_csv(timedelta_days=0)
-            forecast_out = self.get_forecast_out_from_csv(df_final,
-                                                          forecast_dates_csv,
-                                                          csv_path)
+            forecast_out = self.get_forecast_out_from_csv_or_list(
+                df_final, forecast_dates_csv, csv_path)
             df_final[self.var_prod_price] = forecast_out
         elif method == 'list': # reading a list of values
             # Loading data from passed list
@@ -767,17 +819,18 @@ class Forecast(object):
             # Check if the passed data has the correct length
             if len(data_list) < len(self.forecast_dates) and self.params['passed_data']['prediction_horizon'] is None:
                 self.logger.error("Passed data from passed list is not long enough")
+                return False
             else:
                 # Ensure correct length
                 data_list = data_list[0:len(self.forecast_dates)]
                 # Define the correct dates
                 forecast_dates_csv = self.get_forecast_days_csv(timedelta_days=0)
-                forecast_out = self.get_forecast_out_from_csv(
-                    df_final, forecast_dates_csv, None, data_list=data_list)
+                forecast_out = self.get_forecast_out_from_csv_or_list(
+                    df_final, forecast_dates_csv, None, data_list=data_list, list_and_perfect=list_and_perfect)
                 # Fill the final DF
                 df_final[self.var_prod_price] = forecast_out
         else:
             self.logger.error("Passed method is not valid")
-            
+            return False
         return df_final
     

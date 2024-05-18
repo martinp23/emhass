@@ -31,7 +31,7 @@ class Optimization:
 
     def __init__(self, retrieve_hass_conf: dict, optim_conf: dict, plant_conf: dict, 
                  var_load_cost: str, var_prod_price: str, 
-                 costfun: str, base_path: str, logger: logging.Logger, 
+                 costfun: str, emhass_conf: dict, logger: logging.Logger, 
                  opt_time_delta: Optional[int] = 24) -> None:
         r"""
         Define constructor for Optimization class.
@@ -50,8 +50,8 @@ class Optimization:
         :type var_prod_price: str
         :param costfun: The type of cost function to use for optimization problem
         :type costfun: str
-        :param base_path: The path to the yaml configuration file
-        :type base_path: str
+        :param emhass_conf: Dictionary containing the needed emhass paths
+        :type emhass_conf: dict
         :param logger: The passed logger object
         :type logger: logging object
         :param opt_time_delta: The number of hours to optimize. If days_list has \
@@ -71,6 +71,7 @@ class Optimization:
         self.var_load = self.retrieve_hass_conf['var_load']
         self.var_load_new = self.var_load+'_positive'
         self.costfun = costfun
+        # self.emhass_conf = emhass_conf
         self.logger = logger
         self.var_load_cost = var_load_cost
         self.var_prod_price = var_prod_price
@@ -162,10 +163,10 @@ class Optimization:
         
         ## Add decision variables
         P_grid_neg  = {(i):plp.LpVariable(cat='Continuous',
-                                          lowBound=-self.plant_conf['P_grid_max'], upBound=0,
+                                          lowBound=-self.plant_conf['P_to_grid_max'], upBound=0,
                                           name="P_grid_neg{}".format(i)) for i in set_I}
         P_grid_pos  = {(i):plp.LpVariable(cat='Continuous',
-                                          lowBound=0, upBound=self.plant_conf['P_grid_max'],
+                                          lowBound=0, upBound=self.plant_conf['P_from_grid_max'],
                                           name="P_grid_pos{}".format(i)) for i in set_I}
         P_deferrable = []
         P_def_bin1 = []
@@ -267,13 +268,13 @@ class Optimization:
         # Avoid injecting and consuming from grid at the same time
         constraints.update({"constraint_pgridpos_{}".format(i) : 
             plp.LpConstraint(
-                e = P_grid_pos[i] - self.plant_conf['P_grid_max']*D[i],
+                e = P_grid_pos[i] - self.plant_conf['P_from_grid_max']*D[i],
                 sense = plp.LpConstraintLE,
                 rhs = 0)
             for i in set_I})
         constraints.update({"constraint_pgridneg_{}".format(i) : 
             plp.LpConstraint(
-                e = -P_grid_neg[i] - self.plant_conf['P_grid_max']*(1-D[i]),
+                e = -P_grid_neg[i] - self.plant_conf['P_to_grid_max']*(1-D[i]),
                 sense = plp.LpConstraintLE,
                 rhs = 0)
             for i in set_I})
@@ -324,7 +325,6 @@ class Optimization:
                     for i in set_I})
             # Treat the number of starts for a deferrable load
             if self.optim_conf['set_def_constant'][k]:
-                
                 constraints.update({"constraint_pdef{}_start1_{}".format(k, i) : 
                     plp.LpConstraint(
                         e=P_deferrable[k][i] - P_def_bin2[k][i]*M,
