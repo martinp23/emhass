@@ -547,7 +547,7 @@ class Forecast(object):
                 forecast_out = pd.concat([forecast_out, forecast_tp], axis=0)
         return forecast_out
     
-    def get_load_forecast(self, days_min_load_forecast: Optional[int] = 3, method: Optional[str] = 'naive',
+    def get_load_forecast(self, days_min_load_forecast: Optional[int] = 2, method: Optional[str] = 'naive',
                           csv_path: Optional[str] = "/data/data_load_forecast.csv",
                           set_mix_forecast:Optional[bool] = False, df_now:Optional[pd.DataFrame] = pd.DataFrame(),
                           use_last_window: Optional[bool] = True, mlf: Optional[MLForecaster] = None,
