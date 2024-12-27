@@ -1,5 +1,93 @@
 # Changelog
 
+## 0.11.4 - 2024-12-24
+### Fix
+- Fix bug when treating runtime params, fix optimization_time_step timedelta 
+
+## 0.11.3 - 2024-12-23
+### Improvement
+- Runtime parameters now support all config parameters
+- Adopted the Ruff code fomatting
+- Added a Github Actions for Google OSV security code scan 
+- Updated the param_definitions.json 
+- Bump skforecast from 0.13.0 to 0.14.0. This needed upgrading a bunch of deprecated options. Notably skforcast now uses the time series cross-validation object (cv) from sklearn 
+### Fix
+- Updated the default battery optimization weights
+- Fix publish_data defaulting to opt_res_latest, tweak warning logs
+- Added MLForecaster options to load_forecast_method for param_definitions.json
+
+## 0.11.2 - 2024-10-31
+### Improvement
+- Added support to retrieve HA configuration. This will be used in the future to automatically retrieve some parameters as the currency
+### Fix
+- utils fix runtime parameter merge bugs 
+- configuration_script.js fix placeholder value bug 
+
+## 0.11.1 - 2024-10-29
+### Fix
+- Fix parameter saving and duplicate battery bugs 
+- utils.py add more specific logging information for config 
+- Fix issue where thermal runtime parameters were not being propagated into optim_conf 
+
+## 0.11.0 - 2024-10-25
+
+This version marks huge improvement works by @GeoDerp aiming to simplfy the intial and normal setup of EMHASS. The workflow for setting the EMHASS configuration regardless of the installation method has now been centralized on the single `config.json` file. The webserver has now a configuration tab that can be used to to modify and save the `config.json` file.
+
+The complete discussion of the changes on this thread:
+[https://github.com/davidusb-geek/emhass/pull/334](https://github.com/davidusb-geek/emhass/pull/334)
+
+### Automatic version bot improvements
+- Bump h5py from 3.11.0 to 3.12.1
+- Bump markupsafe from 2.1.5 to 3.0.2
+
+### Fix
+- Revert to myst-parser==3.0.1 to solve documentation compilation failures
+
+## 0.10.6 - 2024-07-14
+### Fix
+- Fixed bug on predicted room temeprature publish, wrong key on DataFrame
+
+## 0.10.5 - 2024-07-12
+### Improvement
+- Added support for pubishing thermal load data, namely the predicted room temperature
+
+## 0.10.4 - 2024-07-10
+### Improvement
+- Added a new thermal modeling, see the new section in the documentation for help to implement this of model for thermal deferrable loads
+- Improved documentation
+
+## 0.10.3 - 2024-07-06
+### Improvement
+- Added improved support for `def_start_penalty` option
+- Improved documentation
+
+## 0.10.2 - 2024-07-06
+### Improvement
+- Weather forecast caching and Solcast method fix by @GeoDerp
+- Added a new configuration parameter to control wether we compute PV curtailment or not
+- Added hybrid inverter to data publish
+- It is now possible to pass these battery parameters at runtime: `SOCmin`, `SOCmax`, `Pd_max` and `Pc_max`
+### Fix
+- Fixed problem with negative PV forecast values in optimization.py, by @GeoDerp
+
+## 0.10.1 - 2024-06-03
+### Fix
+- Fixed PV curtailment maximum possible value constraint
+- Added PV curtailement to variable to publish to HA
+
+## 0.10.0 - 2024-06-02
+### BREAKING CHANGE
+- In this new version we have added support for PV curtailment computation. While doing this the nominal PV peak power is needed. The easiest way find this information is by directly using the `inverter_model` defined in the configuration. As this is needed in the optimization to correctly compute PV curtailment, this parameter need to be properly defined for your installation. Before this chage this parameter was only needed if using the PV forecast method `scrapper`, but now it is not optional as it is directly used in the optimization. 
+Use the dedicated webapp to find the correct model for your inverter, if you cannot find your exact brand/model then just pick an inverter with the same nominal power as yours: [https://emhass-pvlib-database.streamlit.app/](https://emhass-pvlib-database.streamlit.app/)
+### Improvement
+- Added support for hybrid inverters and PV curtailment computation
+- Implemented a new `continual_publish` service that avoid the need of setting a special automation for data publish. Thanks to @GeoDerp
+- Implement a deferrable load start penalty functionality. Thanks to @werdnum
+  - This feature also implement a `def_current_state` that can be passed at runtime to let the optimization consider that a deferrable load is currently scheduled or under operation when launching the optimization task
+### Fix
+- Fixed forecast methods to treat delta_forecast higher than 1 day
+- Fixed solar.forecast wrong interpolation of nan values
+
 ## 0.9.1 - 2024-05-13
 ### Fix
 - Fix patch for issue with paths to modules and inverters database

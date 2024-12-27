@@ -1,15 +1,17 @@
 # ---> Python
 test.py
+# Legacy config yaml file
+config_emhass.yaml
 # Secret yaml file
 secrets_emhass.yaml
+# config json file 
+**/config.json
 *.tar
 .vscode/*
 .vscode/launch.json
 .vscode/settings.json
 .vscode/tasks.json
-*.html
 *.pkl
-data/actionLogs.txt
 **/app
 
 
@@ -40,6 +42,10 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Local session data 
+data/actionLogs.txt
+data/entities/*.json
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

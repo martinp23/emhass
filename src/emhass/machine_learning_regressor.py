@@ -76,8 +76,16 @@ class MLRegressor:
 
     """
 
-    def __init__(self: MLRegressor, data: pd.DataFrame, model_type: str, regression_model: str,
-                 features: list, target: str, timestamp: str, logger: logging.Logger) -> None:
+    def __init__(
+        self: MLRegressor,
+        data: pd.DataFrame,
+        model_type: str,
+        regression_model: str,
+        features: list,
+        target: str,
+        timestamp: str,
+        logger: logging.Logger,
+    ) -> None:
         r"""Define constructor for the forecast class.
 
         :param data: The data that will be used for train/test
@@ -116,7 +124,9 @@ class MLRegressor:
         self.grid_search = None
 
     @staticmethod
-    def add_date_features(data: pd.DataFrame, date_features: list, timestamp: str) -> pd.DataFrame:
+    def add_date_features(
+        data: pd.DataFrame, date_features: list, timestamp: str
+    ) -> pd.DataFrame:
         """Add date features from the input DataFrame timestamp.
 
         :param data: The input DataFrame
@@ -176,15 +186,17 @@ class MLRegressor:
                 "Passed model %s is not valid",
                 self.regression_model,
             )
-            return None
+            return None, None
         return base_model, param_grid
 
-    def fit(self: MLRegressor, date_features: list | None = None) -> None:
+    def fit(self: MLRegressor, date_features: list | None = None) -> bool:
         r"""Fit the model using the provided data.
 
         :param date_features: A list of 'date_features' to take into account when \
             fitting the model.
         :type data: list
+        :return: bool if successful
+        :rtype: bool
         """
         self.logger.info("Performing a MLRegressor fit for %s", self.model_type)
         self.data_exo = pd.DataFrame(self.data)
@@ -213,14 +225,25 @@ class MLRegressor:
         self.data_exo = self.data_exo.drop(self.target, axis=1)
         if self.timestamp is not None:
             self.data_exo = self.data_exo.drop(self.timestamp, axis=1)
-        X = self.data_exo 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        X = self.data_exo
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
         self.steps = len(X_test)
         base_model, param_grid = self.get_regression_model()
+        if base_model is None:
+            return False
         self.model = make_pipeline(StandardScaler(), base_model)
         # Create a grid search object
-        self.grid_search = GridSearchCV(self.model, param_grid, cv=5, scoring="neg_mean_squared_error",
-                                        refit=True, verbose=0, n_jobs=-1)
+        self.grid_search = GridSearchCV(
+            self.model,
+            param_grid,
+            cv=5,
+            scoring="neg_mean_squared_error",
+            refit=True,
+            verbose=0,
+            n_jobs=-1,
+        )
         # Fit the grid search object to the data
         self.logger.info("Training a %s model", self.regression_model)
         start_time = time.time()
@@ -235,6 +258,7 @@ class MLRegressor:
             "Prediction R2 score of fitted model on test data: %s",
             pred_metric,
         )
+        return True
 
     def predict(self: MLRegressor, new_values: list) -> np.ndarray:
         """Predict a new value.

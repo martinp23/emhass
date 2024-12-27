@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import json
 import copy
 import datetime
+import json
 import logging
+import os
+import pathlib
 from typing import Optional
+
 import numpy as np
 import pandas as pd
 from requests import get, post
@@ -30,9 +33,17 @@ class RetrieveHass:
     
     """
 
-    def __init__(self, hass_url: str, long_lived_token: str, freq: pd.Timedelta, 
-                 time_zone: datetime.timezone, params: str, emhass_conf: dict, logger: logging.Logger,
-                 get_data_from_file: Optional[bool] = False) -> None:
+    def __init__(
+        self,
+        hass_url: str,
+        long_lived_token: str,
+        freq: pd.Timedelta,
+        time_zone: datetime.timezone,
+        params: str,
+        emhass_conf: dict,
+        logger: logging.Logger,
+        get_data_from_file: Optional[bool] = False,
+    ) -> None:
         """
         Define constructor for RetrieveHass class.
 
@@ -60,14 +71,37 @@ class RetrieveHass:
         self.long_lived_token = long_lived_token
         self.freq = freq
         self.time_zone = time_zone
-        self.params = params
-        # self.emhass_conf = emhass_conf
+        if (params == None) or (params == "null"):
+            self.params = {}
+        elif type(params) is dict:
+            self.params = params
+        else:
+            self.params = json.loads(params)
+        self.emhass_conf = emhass_conf
         self.logger = logger
         self.get_data_from_file = get_data_from_file
 
-    def get_data(self, days_list: pd.date_range, var_list: list, 
-                 minimal_response: Optional[bool] = False, significant_changes_only: Optional[bool] = False,
-                 test_url: Optional[str] = "empty") -> None:
+    def get_ha_config(self):
+        """
+        Extract some configuration data from HA.
+
+        """
+        headers = {
+            "Authorization": "Bearer " + self.long_lived_token,
+            "content-type": "application/json",
+        }
+        url = self.hass_url + "api/config"
+        response_config = get(url, headers=headers)
+        self.ha_config = response_config.json()
+
+    def get_data(
+        self,
+        days_list: pd.date_range,
+        var_list: list,
+        minimal_response: Optional[bool] = False,
+        significant_changes_only: Optional[bool] = False,
+        test_url: Optional[str] = "empty",
+    ) -> None:
         r"""
         Retrieve the actual data from hass.
         
@@ -91,10 +125,14 @@ class RetrieveHass:
             are experimental
         """
         self.logger.info("Retrieve hass get data method initiated...")
+        headers = {
+            "Authorization": "Bearer " + self.long_lived_token,
+            "content-type": "application/json",
+        }
+        # Looping on each day from days list
         self.df_final = pd.DataFrame()
         finalVals = {}
         x = 0  # iterate based on days
-        # Looping on each day from days list
         for day in days_list:
             for i, var in enumerate(var_list):
                 if test_url == "empty":
@@ -118,16 +156,10 @@ class RetrieveHass:
                         )
                     if minimal_response:  # A support for minimal response
                         url = url + "?minimal_response"
-                    if (
-                        significant_changes_only
-                    ):  # And for signicant changes only (check the HASS restful API for more info)
+                    if significant_changes_only:  # And for signicant changes only (check the HASS restful API for more info)
                         url = url + "?significant_changes_only"
                 else:
                     url = test_url
-                headers = {
-                    "Authorization": "Bearer " + self.long_lived_token,
-                    "content-type": "application/json",
-                }
                 try:
                     response = get(url, headers=headers)
                 except Exception:
@@ -157,9 +189,19 @@ class RetrieveHass:
                     data = response.json()[0]
                 except IndexError:
                     if x == 0:
-                        self.logger.error("The retrieved JSON is empty, A sensor:" + var + " may have 0 days of history, passed sensor may not be correct, or days to retrieve is set too heigh")
+                        self.logger.error(
+                            "The retrieved JSON is empty, A sensor:"
+                            + var
+                            + " may have 0 days of history, passed sensor may not be correct, or days to retrieve is set too heigh"
+                        )
                     else:
-                        self.logger.error("The retrieved JSON is empty for day:"+ str(day) +", days_to_retrieve may be larger than the recorded history of sensor:" + var + " (check your recorder settings)")
+                        self.logger.error(
+                            "The retrieved JSON is empty for day:"
+                            + str(day)
+                            + ", days_to_retrieve may be larger than the recorded history of sensor:"
+                            + var
+                            + " (check your recorder settings)"
+                        )
                     return False
                 df_raw = pd.DataFrame.from_dict(data)
                 # self.logger.info(str(df_raw))
@@ -171,17 +213,41 @@ class RetrieveHass:
                             + " may have 0 days of history or passed sensor may not be correct"
                         )
                     else:
-                        self.logger.error("Retrieved empty Dataframe for day:"+ str(day) +", days_to_retrieve may be larger than the recorded history of sensor:" + var + " (check your recorder settings)")
+                        self.logger.error(
+                            "Retrieved empty Dataframe for day:"
+                            + str(day)
+                            + ", days_to_retrieve may be larger than the recorded history of sensor:"
+                            + var
+                            + " (check your recorder settings)"
+                        )
                     return False
                 # self.logger.info(self.freq.seconds)
-                if len(df_raw) < ((60 / (self.freq.seconds / 60)) * 24) and x != len(days_list) -1: #check if there is enough Dataframes for passed frequency per day (not inc current day)
-                    self.logger.debug("sensor:"  + var + " retrieved Dataframe count: " + str(len(df_raw))  + ", on day: " + str(day) + ". This is less than freq value passed: " + str(self.freq))
-                if i == 0: # Defining the DataFrame container
-                    from_date = pd.to_datetime(df_raw['last_changed'], format="ISO8601").min()
-                    to_date = pd.to_datetime(df_raw['last_changed'], format="ISO8601").max()
-                    ts = pd.to_datetime(pd.date_range(start=from_date, end=to_date, freq=self.freq), 
-                                        format='%Y-%d-%m %H:%M').round(self.freq, ambiguous='infer', nonexistent='shift_forward')
-                    df_day = pd.DataFrame(index = ts)
+                if (
+                    len(df_raw) < ((60 / (self.freq.seconds / 60)) * 24)
+                    and x != len(days_list) - 1
+                ):  # check if there is enough Dataframes for passed frequency per day (not inc current day)
+                    self.logger.debug(
+                        "sensor:"
+                        + var
+                        + " retrieved Dataframe count: "
+                        + str(len(df_raw))
+                        + ", on day: "
+                        + str(day)
+                        + ". This is less than freq value passed: "
+                        + str(self.freq)
+                    )
+                if i == 0:  # Defining the DataFrame container
+                    from_date = pd.to_datetime(
+                        df_raw["last_changed"], format="ISO8601"
+                    ).min()
+                    to_date = pd.to_datetime(
+                        df_raw["last_changed"], format="ISO8601"
+                    ).max()
+                    ts = pd.to_datetime(
+                        pd.date_range(start=from_date, end=to_date, freq=self.freq),
+                        format="%Y-%d-%m %H:%M",
+                    ).round(self.freq, ambiguous="infer", nonexistent="shift_forward")
+                    df_day = pd.DataFrame(index=ts)
                 # Caution with undefined string data: unknown, unavailable, etc.
                 df_tp = (
                     df_raw.copy()[["state"]]
@@ -198,7 +264,7 @@ class RetrieveHass:
                 df_day = pd.concat([df_day, df_tp], axis=1)
                 finalVals[var] = float(df_raw.iloc[-1]['state'])
             self.df_final = pd.concat([self.df_final, df_day], axis=0)
-            x += 1 
+            x += 1
         self.df_final = set_df_index_freq(self.df_final)
 
         # set the last entry of sensor values to be the last entry in the processed dataframe
@@ -207,13 +273,23 @@ class RetrieveHass:
             self.df_final.iloc[-1, self.df_final.columns.get_loc(var)] = finalVals[var]
         
         if self.df_final.index.freq != self.freq:
-            self.logger.error("The inferred freq:" + str(self.df_final.index.freq) + " from data is not equal to the defined freq in passed:" + str(self.freq))
+            self.logger.error(
+                "The inferred freq:"
+                + str(self.df_final.index.freq)
+                + " from data is not equal to the defined freq in passed:"
+                + str(self.freq)
+            )
             return False
         return True
-           
-    
-    def prepare_data(self, var_load: str, load_negative: Optional[bool] = False, set_zero_min: Optional[bool] = True,
-                     var_replace_zero: Optional[list] = None, var_interp: Optional[list] = None) -> None:
+
+    def prepare_data(
+        self,
+        var_load: str,
+        load_negative: Optional[bool] = False,
+        set_zero_min: Optional[bool] = True,
+        var_replace_zero: Optional[list] = None,
+        var_interp: Optional[list] = None,
+    ) -> None:
         r"""
         Apply some data treatment in preparation for the optimization task.
         
@@ -290,8 +366,15 @@ class RetrieveHass:
         return True
 
     @staticmethod
-    def get_attr_data_dict(data_df: pd.DataFrame, idx: int, entity_id: str, unit_of_measurement: str,
-                           friendly_name: str, list_name: str, state: float) -> dict:
+    def get_attr_data_dict(
+        data_df: pd.DataFrame,
+        idx: int,
+        entity_id: str,
+        unit_of_measurement: str,
+        friendly_name: str,
+        list_name: str,
+        state: float,
+    ) -> dict:
         list_df = copy.deepcopy(data_df).loc[data_df.index[idx] :].reset_index()
         list_df.columns = ["timestamps", entity_id]
         ts_list = [str(i) for i in list_df["timestamps"].tolist()]
@@ -312,9 +395,20 @@ class RetrieveHass:
         }
         return data
 
-    def post_data(self, data_df: pd.DataFrame, idx: int, entity_id: str, unit_of_measurement: str,
-                  friendly_name: str, type_var: str, from_mlforecaster: Optional[bool] = False,
-                  publish_prefix: Optional[str] = "") -> None:
+    def post_data(
+        self,
+        data_df: pd.DataFrame,
+        idx: int,
+        entity_id: str,
+        unit_of_measurement: str,
+        friendly_name: str,
+        type_var: str,
+        from_mlforecaster: Optional[bool] = False,
+        publish_prefix: Optional[str] = "",
+        save_entities: Optional[bool] = False,
+        logger_levels: Optional[str] = "info",
+        dont_post: Optional[bool] = False,
+    ) -> None:
         r"""
         Post passed data to hass.
         
@@ -334,6 +428,12 @@ class RetrieveHass:
         :type type_var: str
         :param publish_prefix: A common prefix for all published data entity_id.
         :type publish_prefix: str, optional
+        :param save_entities: if entity data should be saved in data_path/entities
+        :type save_entities: bool, optional
+        :param logger_levels: set logger level, info or debug, to output  
+        :type logger_levels: str, optional
+        :param dont_post: dont post to HA
+        :type dont_post: bool, optional
 
         """
         # Add a possible prefix to the entity ID
@@ -351,7 +451,9 @@ class RetrieveHass:
         }
         # Preparing the data dict to be published
         if type_var == "cost_fun":
-            state = np.round(data_df.sum()[0], 2)
+            if isinstance(data_df.iloc[0], pd.Series):  # if Series extract
+                data_df = data_df.iloc[:, 0]
+            state = np.round(data_df.sum(), 2)
         elif type_var == "unit_load_cost" or type_var == "unit_prod_price":
             state = np.round(data_df.loc[data_df.index[idx]], 4)
         elif type_var == "optim_status":
@@ -361,26 +463,85 @@ class RetrieveHass:
         else:
             state = np.round(data_df.loc[data_df.index[idx]], 2)
         if type_var == "power":
-            data = RetrieveHass.get_attr_data_dict(data_df, idx, entity_id, unit_of_measurement,
-                                                   friendly_name, "forecasts", state)
+            data = RetrieveHass.get_attr_data_dict(
+                data_df,
+                idx,
+                entity_id,
+                unit_of_measurement,
+                friendly_name,
+                "forecasts",
+                state,
+            )
         elif type_var == "deferrable":
-            data = RetrieveHass.get_attr_data_dict(data_df, idx, entity_id, unit_of_measurement,
-                                                   friendly_name, "deferrables_schedule", state)
+            data = RetrieveHass.get_attr_data_dict(
+                data_df,
+                idx,
+                entity_id,
+                unit_of_measurement,
+                friendly_name,
+                "deferrables_schedule",
+                state,
+            )
+        elif type_var == "temperature":
+            data = RetrieveHass.get_attr_data_dict(
+                data_df,
+                idx,
+                entity_id,
+                unit_of_measurement,
+                friendly_name,
+                "predicted_temperatures",
+                state,
+            )
         elif type_var == "batt":
-            data = RetrieveHass.get_attr_data_dict(data_df, idx, entity_id, unit_of_measurement,
-                                                   friendly_name, "battery_scheduled_power", state)
+            data = RetrieveHass.get_attr_data_dict(
+                data_df,
+                idx,
+                entity_id,
+                unit_of_measurement,
+                friendly_name,
+                "battery_scheduled_power",
+                state,
+            )
         elif type_var == "SOC":
-            data = RetrieveHass.get_attr_data_dict(data_df, idx, entity_id, unit_of_measurement,
-                                                   friendly_name, "battery_scheduled_soc", state)
+            data = RetrieveHass.get_attr_data_dict(
+                data_df,
+                idx,
+                entity_id,
+                unit_of_measurement,
+                friendly_name,
+                "battery_scheduled_soc",
+                state,
+            )
         elif type_var == "unit_load_cost":
-            data = RetrieveHass.get_attr_data_dict(data_df, idx, entity_id, unit_of_measurement, 
-                                                   friendly_name, "unit_load_cost_forecasts", state)
+            data = RetrieveHass.get_attr_data_dict(
+                data_df,
+                idx,
+                entity_id,
+                unit_of_measurement,
+                friendly_name,
+                "unit_load_cost_forecasts",
+                state,
+            )
         elif type_var == "unit_prod_price":
-            data = RetrieveHass.get_attr_data_dict(data_df, idx, entity_id, unit_of_measurement,
-                                                   friendly_name, "unit_prod_price_forecasts", state)
+            data = RetrieveHass.get_attr_data_dict(
+                data_df,
+                idx,
+                entity_id,
+                unit_of_measurement,
+                friendly_name,
+                "unit_prod_price_forecasts",
+                state,
+            )
         elif type_var == "mlforecaster":
-            data = RetrieveHass.get_attr_data_dict(data_df, idx, entity_id, unit_of_measurement,
-                                                   friendly_name, "scheduled_forecast", state)
+            data = RetrieveHass.get_attr_data_dict(
+                data_df,
+                idx,
+                entity_id,
+                unit_of_measurement,
+                friendly_name,
+                "scheduled_forecast",
+                state,
+            )
         elif type_var == "optim_status":
             data = {
                 "state": state,
@@ -406,18 +567,69 @@ class RetrieveHass:
                 },
             }
         # Actually post the data
-        if self.get_data_from_file:
+        if self.get_data_from_file or dont_post:
+
             class response:
                 pass
+
             response.status_code = 200
             response.ok = True
         else:
             response = post(url, headers=headers, data=json.dumps(data))
+
         # Treating the response status and posting them on the logger
         if response.ok:
-            self.logger.info("Successfully posted to " + entity_id + " = " + str(state))
+            if logger_levels == "DEBUG":
+                self.logger.debug(
+                    "Successfully posted to " + entity_id + " = " + str(state)
+                )
+            else:
+                self.logger.info(
+                    "Successfully posted to " + entity_id + " = " + str(state)
+                )
+
+            # If save entities is set, save entity data to /data_path/entities
+            if save_entities:
+                entities_path = self.emhass_conf["data_path"] / "entities"
+
+                # Clarify folder exists
+                pathlib.Path(entities_path).mkdir(parents=True, exist_ok=True)
+
+                # Save entity data to json file
+                result = data_df.to_json(
+                    index="timestamp", orient="index", date_unit="s", date_format="iso"
+                )
+                parsed = json.loads(result)
+                with open(entities_path / (entity_id + ".json"), "w") as file:
+                    json.dump(parsed, file, indent=4)
+
+                # Save the required metadata to json file
+                if os.path.isfile(entities_path / "metadata.json"):
+                    with open(entities_path / "metadata.json", "r") as file:
+                        metadata = json.load(file)
+                else:
+                    metadata = {}
+                with open(entities_path / "metadata.json", "w") as file:
+                    # Save entity metadata, key = entity_id
+                    metadata[entity_id] = {
+                        "name": data_df.name,
+                        "unit_of_measurement": unit_of_measurement,
+                        "friendly_name": friendly_name,
+                        "type_var": type_var,
+                        "optimization_time_step": int(self.freq.seconds / 60),
+                    }
+
+                    # Find lowest frequency to set for continual loop freq
+                    if metadata.get("lowest_time_step", None) == None or metadata[
+                        "lowest_time_step"
+                    ] > int(self.freq.seconds / 60):
+                        metadata["lowest_time_step"] = int(self.freq.seconds / 60)
+                    json.dump(metadata, file, indent=4)
+
+                    self.logger.debug("Saved " + entity_id + " to json file")
+
         else:
-            self.logger.info(
+            self.logger.warning(
                 "The status code for received curl command response is: "
                 + str(response.status_code)
             )
