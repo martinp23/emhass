@@ -699,7 +699,7 @@ class Optimization:
                         predicted_temps[k] = predicted_temp
 
             else:
-                if def_total_hours[k] > 0:
+                if def_total_hours[k] >= 0:
                     # Total time of deferrable load
                     constraints.update(
                         {
