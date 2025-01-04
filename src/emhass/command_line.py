@@ -81,7 +81,8 @@ def set_input_data_dict(
         logger,
         emhass_conf,
     )
-    # Define main objects
+
+    # Define the data retrieve object
     rh = RetrieveHass(
         retrieve_hass_conf["hass_url"],
         retrieve_hass_conf["long_lived_token"],
@@ -92,6 +93,23 @@ def set_input_data_dict(
         logger,
         get_data_from_file=get_data_from_file,
     )
+
+    # Retrieve basic configuration data from hass
+    if get_data_from_file:
+        with open(emhass_conf["data_path"] / "test_df_final.pkl", "rb") as inp:
+            _, _, _, rh.ha_config = pickle.load(inp)
+    else:
+        response = rh.get_ha_config()
+        if type(response) is bool:
+            return False
+
+    # Update the params dict using data from the HA configuration
+    params = utils.update_params_with_ha_config(
+        params,
+        rh.ha_config,
+    )
+
+    # Define the forecast and optimization objects
     fcst = Forecast(
         retrieve_hass_conf,
         optim_conf,
@@ -111,12 +129,13 @@ def set_input_data_dict(
         emhass_conf,
         logger,
     )
+
     # Perform setup based on type of action
     if set_type == "perfect-optim":
         # Retrieve data from hass
         if get_data_from_file:
             with open(emhass_conf["data_path"] / "test_df_final.pkl", "rb") as inp:
-                rh.df_final, days_list, var_list = pickle.load(inp)
+                rh.df_final, days_list, var_list, rh.ha_config = pickle.load(inp)
             retrieve_hass_conf["sensor_power_load_no_var_loads"] = str(var_list[0])
             retrieve_hass_conf["sensor_power_photovoltaics"] = str(var_list[1])
             retrieve_hass_conf["sensor_linear_interp"] = [
@@ -154,12 +173,18 @@ def set_input_data_dict(
         P_PV_forecast, P_load_forecast, df_input_data_dayahead = None, None, None
     elif set_type == "dayahead-optim":
         # Get PV and load forecasts
-        df_weather = fcst.get_weather_forecast(
-            method=optim_conf["weather_forecast_method"]
-        )
-        if isinstance(df_weather, bool) and not df_weather:
-            return False
-        P_PV_forecast = fcst.get_power_from_weather(df_weather)
+        if (
+            optim_conf["set_use_pv"]
+            or optim_conf.get("weather_forecast_method", None) == "list"
+        ):
+            df_weather = fcst.get_weather_forecast(
+                method=optim_conf["weather_forecast_method"]
+            )
+            if isinstance(df_weather, bool) and not df_weather:
+                return False
+            P_PV_forecast = fcst.get_power_from_weather(df_weather)
+        else:
+            P_PV_forecast = pd.Series(0, index=fcst.forecast_dates)
         P_load_forecast = fcst.get_load_forecast(
             method=optim_conf["load_forecast_method"]
         )
@@ -208,7 +233,7 @@ def set_input_data_dict(
         # Retrieve data from hass
         if get_data_from_file:
             with open(emhass_conf["data_path"] / "test_df_final.pkl", "rb") as inp:
-                rh.df_final, days_list, var_list = pickle.load(inp)
+                rh.df_final, days_list, var_list, rh.ha_config = pickle.load(inp)
             retrieve_hass_conf["sensor_power_load_no_var_loads"] = str(var_list[0])
             retrieve_hass_conf["sensor_power_photovoltaics"] = str(var_list[1])
             retrieve_hass_conf["sensor_linear_interp"] = [
@@ -241,14 +266,20 @@ def set_input_data_dict(
             return False
         df_input_data = rh.df_final.copy()
         # Get PV and load forecasts
-        df_weather = fcst.get_weather_forecast(
-            method=optim_conf["weather_forecast_method"]
-        )
-        if isinstance(df_weather, bool) and not df_weather:
-            return False
-        P_PV_forecast = fcst.get_power_from_weather(
-            df_weather, set_mix_forecast=True, df_now=df_input_data
-        )
+        if (
+            optim_conf["set_use_pv"]
+            or optim_conf.get("weather_forecast_method", None) == "list"
+        ):
+            df_weather = fcst.get_weather_forecast(
+                method=optim_conf["weather_forecast_method"]
+            )
+            if isinstance(df_weather, bool) and not df_weather:
+                return False
+            P_PV_forecast = fcst.get_power_from_weather(
+                df_weather, set_mix_forecast=True, df_now=df_input_data
+            )
+        else:
+            P_PV_forecast = pd.Series(0, index=fcst.forecast_dates)
         P_load_forecast = fcst.get_load_forecast(
             method=optim_conf["load_forecast_method"],
             set_mix_forecast=True,
@@ -403,10 +434,8 @@ def weather_forecast_cache(
     :rtype: bool
 
     """
-
     # Parsing yaml
     retrieve_hass_conf, optim_conf, plant_conf = utils.get_yaml_parse(params, logger)
-
     # Treat runtimeparams
     params, retrieve_hass_conf, optim_conf, plant_conf = utils.treat_runtimeparams(
         runtimeparams,
@@ -418,7 +447,6 @@ def weather_forecast_cache(
         logger,
         emhass_conf,
     )
-
     # Make sure weather_forecast_cache is true
     if (params != None) and (params != "null"):
         params = json.loads(params)
@@ -426,12 +454,10 @@ def weather_forecast_cache(
         params = {}
     params["passed_data"]["weather_forecast_cache"] = True
     params = json.dumps(params)
-
     # Create Forecast object
     fcst = Forecast(
         retrieve_hass_conf, optim_conf, plant_conf, params, emhass_conf, logger
     )
-
     result = fcst.get_weather_forecast(optim_conf["weather_forecast_method"])
     if isinstance(result, bool) and not result:
         return False

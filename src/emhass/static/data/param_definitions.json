@@ -101,11 +101,12 @@
       "Description": "The load forecast method that will be used. The options are ‘csv’ to load a CSV file or ‘naive’ for a simple 1-day persistence model.",
       "input": "select",
       "select_options": [
+        "typical",
         "naive",
         "mlforecaster",
         "csv"
       ],
-      "default_value": "naive"
+      "default_value": "typical"
     },
     "set_total_pv_sell": {
       "friendly_name": "PV straight to grid",
@@ -229,6 +230,12 @@
     }
   },
   "Solar System (PV)": {
+    "set_use_pv": {
+      "friendly_name": "Enable PV system",
+      "Description": "Set to True if we should consider an solar PV system. Defaults to False",
+      "input": "boolean",
+      "default_value": false
+    },
     "pv_module_model": {
       "friendly_name": "PV module model name",
       "Description": "The PV module model. This parameter can be a list of items to enable the simulation of mixed orientation systems.",
